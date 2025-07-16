@@ -1,1 +1,4 @@
 /.DS_Store
+custom_components/.DS_Store
+.gitignore
+custom_components/octopus_ev_spain/.DS_Store

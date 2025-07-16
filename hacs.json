@@ -1,6 +1,5 @@
 {
     "name": "Octopus Energy EV Spain",
-    "render_readme": true,
     "homeassistant": "2025.1.0",
     "country":"ES"
 }
