@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Octopus Energy Spain Setup",
+        "description": "Enter your Octopus Energy Spain credentials to connect your account.",
+        "data": {
+          "email": "Email Address",
+          "password": "Account Password"
+        },
+        "data_description": {
+          "email": "The email address used for your Octopus Energy Spain account",
+          "password": "Your account password (stored securely)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to Octopus Energy Spain. Please check your internet connection and try again.",
+      "invalid_auth": "The email or password is incorrect. Please verify your credentials and try again.",
+      "unknown": "An unexpected error occurred. Please try again later."
+    },
+    "abort": {
+      "already_configured": "This Octopus Energy Spain account is already configured in Home Assistant."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "electricity_balance": {
+        "name": "Electricity Balance"
+      },
+      "solar_wallet": {
+        "name": "Solar Wallet Balance"
+      },
+      "gas_balance": {
+        "name": "Gas Balance"
+      },
+      "device_status": {
+        "name": "Device Status"
+      },
+      "current_state": {
+        "name": "Current State"
+      },
+      "charging_sessions": {
+        "name": "Charging Sessions"
+      },
+      "last_energy_added": {
+        "name": "Last Energy Added"
+      },
+      "last_session_cost": {
+        "name": "Last Session Cost"
+      }
+    },
+    "switch": {
+      "boost_charge": {
+        "name": "Boost Charge"
+      }
+    },
+    "button": {
+      "start_boost": {
+        "name": "Start Boost"
+      },
+      "stop_boost": {
+        "name": "Stop Boost"
+      },
+      "refresh_data": {
+        "name": "Refresh Data"
+      }
+    }
+  }
+}

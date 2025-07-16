@@ -1,0 +1,70 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Configuración de Octopus Energy España",
+        "description": "Introduce tus credenciales de Octopus Energy España para conectar tu cuenta.",
+        "data": {
+          "email": "Correo electrónico",
+          "password": "Contraseña de la cuenta"
+        },
+        "data_description": {
+          "email": "El correo electrónico utilizado para tu cuenta de Octopus Energy España",
+          "password": "Tu contraseña (almacenada de forma segura)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "No se puede conectar a Octopus Energy España. Por favor, comprueba tu conexión a internet e inténtalo de nuevo.",
+      "invalid_auth": "El correo electrónico o la contraseña son incorrectos. Por favor, verifica tus credenciales e inténtalo de nuevo.",
+      "unknown": "Ha ocurrido un error inesperado. Por favor, inténtalo de nuevo más tarde."
+    },
+    "abort": {
+      "already_configured": "Esta cuenta de Octopus Energy España ya está configurada en Home Assistant."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "electricity_balance": {
+        "name": "Saldo de electricidad"
+      },
+      "solar_wallet": {
+        "name": "Saldo de monedero solar"
+      },
+      "gas_balance": {
+        "name": "Saldo de gas"
+      },
+      "device_status": {
+        "name": "Estado del dispositivo"
+      },
+      "current_state": {
+        "name": "Estado actual"
+      },
+      "charging_sessions": {
+        "name": "Sesiones de carga"
+      },
+      "last_energy_added": {
+        "name": "Última energía añadida"
+      },
+      "last_session_cost": {
+        "name": "Coste de la última sesión"
+      }
+    },
+    "switch": {
+      "boost_charge": {
+        "name": "Carga rápida"
+      }
+    },
+    "button": {
+      "start_boost": {
+        "name": "Iniciar carga rápida"
+      },
+      "stop_boost": {
+        "name": "Detener carga rápida"
+      },
+      "refresh_data": {
+        "name": "Actualizar datos"
+      }
+    }
+  }
+}

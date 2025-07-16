@@ -1,0 +1,44 @@
+start_boost_charge:
+  name: Start Boost Charge
+  description: Start boost charging for an EV device
+  fields:
+    device_id:
+      name: Device ID
+      description: The unique identifier of the EV device
+      required: true
+      selector:
+        text:
+
+stop_boost_charge:
+  name: Stop Boost Charge
+  description: Stop boost charging for an EV device
+  fields:
+    device_id:
+      name: Device ID
+      description: The unique identifier of the EV device
+      required: true
+      selector:
+        text:
+
+refresh_charger:
+  name: Refresh Charger
+  description: Refresh the EV charger data (auto-detects single charger)
+
+check_charger:
+  name: Check Charger Status  
+  description: Check charger status and notify of changes
+  fields:
+    notify:
+      name: Send Notifications
+      description: Whether to send notifications if status changes
+      default: true
+      selector:
+        boolean:
+
+car_connected:
+  name: Car Connected
+  description: Handle car connection event (refreshes charger + extended monitoring)
+
+car_disconnected:
+  name: Car Disconnected  
+  description: Handle car disconnection event (refreshes charger status)
