@@ -1,5 +1,5 @@
 {
-    "name": "Octopus Energy EV Spain",
-    "homeassistant": "2025.1.0",
-    "country":"ES"
+  "name": "Octopus Energy EV Spain",
+  "country": "ES",
+  "homeassistant": "2025.1.0"
 }

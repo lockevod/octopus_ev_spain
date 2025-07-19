@@ -179,35 +179,11 @@ class OctopusSpainAPI:
         query = """
             query GetAccount($accountNumber: String!) {
                 account(accountNumber: $accountNumber) {
-                    __typename
+                    id
                     number
-                    billingName
-                    billingAddressLine1
-                    billingAddressLine2
-                    billingAddressLine3
-                    billingAddressLine4
-                    billingAddressLine5
-                    billingAddressPostcode
                     ledgers {
-                        __typename
                         ledgerType
                         balance
-                        number
-                        acceptsPayments
-                        statements(first: 5) {
-                            edges {
-                                node {
-                                    id
-                                    amount
-                                    consumptionStartDate
-                                    consumptionEndDate
-                                    issuedDate
-                                    startAt
-                                    endAt
-                                    annulledBy
-                                }
-                            }
-                        }
                     }
                     properties {
                         __typename

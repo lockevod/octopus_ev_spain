@@ -13,8 +13,8 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     CURRENCY_EURO,
-    ENERGY_KILO_WATT_HOUR,
     PERCENTAGE,
+    UnitOfEnergy,
     UnitOfPower,
 )
 from homeassistant.core import HomeAssistant
@@ -94,6 +94,7 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
         self._attr_native_unit_of_measurement = CURRENCY_EURO
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
+        _LOGGER.debug("Initialized ledger sensor %s", self._attr_unique_id)
 
     @property
     def native_value(self) -> float | None:
@@ -130,6 +131,15 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
                 return attrs
         return {}
 
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus EV Energy",
+            "manufacturer": "Octopus EV Energy",
+            "model": "Spain EV API",
+        }
+
 
 class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
     """Sensor for device information."""
@@ -155,7 +165,7 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
             
             # Set appropriate attributes based on sensor type
             if sensor_type == "last_energy_added":
-                self._attr_native_unit_of_measurement = ENERGY_KILO_WATT_HOUR
+                self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
                 self._attr_device_class = SensorDeviceClass.ENERGY
                 self._attr_state_class = SensorStateClass.TOTAL_INCREASING
             elif sensor_type == "last_session_cost":
@@ -173,16 +183,12 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
-        device = self._get_device_data()
-        if not device:
-            return {}
-            
+        # Attach all device sensors to central integration device
         return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "name": device.get("name", "Unknown Device"),
-            "manufacturer": "Octopus Energy",
-            "model": f"{device.get('__typename', 'Unknown')} ({device.get('deviceType', 'Unknown')})",
-            "sw_version": device.get("provider"),
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus EV Energy",
+            "manufacturer": "Octopus EV Energy",
+            "model": "Spain API",
         }
 
     @property
@@ -271,6 +277,7 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
         
         self._attr_name = f"Octopus {sensor_type.replace('_', ' ').title()}"
         self._attr_unique_id = f"octopus_{account_number}_{sensor_type}"
+        _LOGGER.debug("Initialized account sensor %s", self._attr_unique_id)
 
     @property
     def native_value(self) -> Any:
@@ -316,6 +323,17 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
 
         return attrs
 
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        # Attach account sensors to central integration device
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus EV Energy",
+            "manufacturer": "Octopus EV Energy",
+            "model": "Spain API",
+        }
+
 
 class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
     """Sensor for property measurements."""
@@ -326,16 +344,16 @@ class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
         property_id: str,
         sensor_type: str,
     ) -> None:
-        """Initialize the sensor."""
         super().__init__(coordinator)
         self._property_id = property_id
         self._sensor_type = sensor_type
         
         self._attr_name = f"Property {property_id} {sensor_type.title()}"
         self._attr_unique_id = f"octopus_property_{property_id}_{sensor_type}"
-        self._attr_native_unit_of_measurement = ENERGY_KILO_WATT_HOUR
+        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        _LOGGER.debug("Initialized property sensor %s", self._attr_unique_id)
 
     @property
     def native_value(self) -> float | None:
@@ -387,3 +405,17 @@ class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
             ]
 
         return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information."""
+        device = self._get_device_data()
+        if not device:
+            return {}
+            
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus EV Energy",
+            "manufacturer": "Octopus EV Energy",
+            "model": "Spain API",
+        }

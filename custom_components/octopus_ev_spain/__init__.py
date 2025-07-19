@@ -51,6 +51,12 @@ CAR_CONNECTION_SCHEMA = vol.Schema({})
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up Octopus Energy Spain from a config entry."""
+    # If entry already loaded, unload old platforms before reloading
+    if entry.entry_id in hass.data.get(DOMAIN, {}):
+        _LOGGER.info("Reloading config entry %s: unloading previous setup", entry.entry_id)
+        await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+        hass.data[DOMAIN].pop(entry.entry_id)
+
     email = entry.data[CONF_EMAIL]
     password = entry.data[CONF_PASSWORD]
     
@@ -59,11 +65,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         # Test the connection
         login_success = await api.login()
+        _LOGGER.debug("Login successful for %s", email)
         if not login_success:
             raise ConfigEntryAuthFailed("Invalid authentication")
             
-        # Get accounts to verify API works
         viewer_info = await api.get_viewer_info()
+        _LOGGER.debug("Viewer info: %s", viewer_info)
+        # Get accounts to verify API works
         if not viewer_info.get("accounts"):
             raise ConfigEntryNotReady("No accounts found")
             
@@ -78,9 +86,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         api,
         update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
     )
+    # Store entry_id for device registration in entities
+    coordinator.entry_id = entry.entry_id
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
+    _LOGGER.debug("Initial coordinator data: %s", coordinator.data)
 
     # Store coordinator
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -106,6 +117,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _get_single_charger_id(coordinator: OctopusSpainDataUpdateCoordinator) -> str | None:
     """Get the ID of the single EV charger in the account."""
     try:
+        _LOGGER.debug("Devices data: %s", coordinator.data.get("devices"))
         for account_number, account_devices in coordinator.data.get("devices", {}).items():
             for device in account_devices:
                 if device.get("__typename") == "SmartFlexChargePoint":
