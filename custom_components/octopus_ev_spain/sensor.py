@@ -408,14 +408,10 @@ class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
 
     @property
     def device_info(self) -> dict[str, Any]:
-        """Return device information."""
-        device = self._get_device_data()
-        if not device:
-            return {}
-            
-        return {
-            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus EV Energy",
-            "manufacturer": "Octopus EV Energy",
-            "model": "Spain API",
-        }
+            """Attach property sensors to central integration device."""
+            return {
+                "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+                "name": "Octopus EV Energy",
+                "manufacturer": "Octopus EV Energy",
+                "model": "Spain API",
+            }

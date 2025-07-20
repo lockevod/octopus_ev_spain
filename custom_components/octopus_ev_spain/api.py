@@ -1,4 +1,4 @@
-"""API client for Octopus Energy Spain."""
+"""API client for Octopus Energy Spain - CORRECTED based on real YAML."""
 from __future__ import annotations
 
 import asyncio
@@ -97,7 +97,8 @@ class OctopusSpainAPI:
         return response["data"]["viewer"]
 
     async def get_devices(self, account_number: str, device_id: str | None = None) -> list[dict[str, Any]]:
-        """Get smart flex devices."""
+        """Get smart flex devices - EXACT query from YAML."""
+        # Esta es la consulta EXACTA del YAML original que funciona
         query = """
             query GetSmartFlexDevices($accountNumber: String!, $deviceId: String) {
                 devices(accountNumber: $accountNumber, deviceId: $deviceId) {
@@ -109,48 +110,7 @@ class OctopusSpainAPI:
                     propertyId
                     status {
                         current
-                        currentState
                         isSuspended
-                    }
-                    alerts
-                    preferences {
-                        mode
-                        targetType
-                        unit
-                        schedules {
-                            dayOfWeek
-                            time
-                            min
-                            max
-                        }
-                    }
-                    chargePointChargingSession(first: 10) {
-                        edges {
-                            node {
-                                __typename
-                                start
-                                end
-                                energyAdded {
-                                    value
-                                    unit
-                                }
-                                cost
-                                stateOfChargeChange
-                                stateOfChargeFinal
-                                type
-                                problems {
-                                    __typename
-                                    cause
-                                }
-                            }
-                            cursor
-                        }
-                        pageInfo {
-                            hasNextPage
-                            hasPreviousPage
-                            startCursor
-                            endCursor
-                        }
                     }
                     ... on SmartFlexVehicle {
                         make
@@ -174,16 +134,105 @@ class OctopusSpainAPI:
             
         return response["data"]["devices"]
 
+    async def get_devices_with_extended_info(self, account_number: str, device_id: str | None = None) -> list[dict[str, Any]]:
+        """Get devices with extended info - trying additional fields one by one."""
+        # Vamos a probar campos adicionales gradualmente
+        query = """
+            query GetSmartFlexDevicesExtended($accountNumber: String!, $deviceId: String) {
+                devices(accountNumber: $accountNumber, deviceId: $deviceId) {
+                    __typename
+                    id
+                    name
+                    deviceType
+                    provider
+                    propertyId
+                    status {
+                        current
+                        currentState
+                        isSuspended
+                    }
+                    ... on SmartFlexVehicle {
+                        make
+                    }
+                    ... on SmartFlexChargePoint {
+                        preferences {
+                            mode
+                            targetType
+                            unit
+                            schedules {
+                                dayOfWeek
+                                time
+                                min
+                                max
+                            }
+                        }
+                        chargePointChargingSession(first: 10) {
+                            edges {
+                                node {
+                                    __typename
+                                    start
+                                    end
+                                    energyAdded {
+                                        value
+                                        unit
+                                    }
+                                    cost
+                                    stateOfChargeChange
+                                    stateOfChargeFinal
+                                    type
+                                    problems {
+                                        __typename
+                                        cause
+                                    }
+                                }
+                                cursor
+                            }
+                            pageInfo {
+                                hasNextPage
+                                hasPreviousPage
+                                startCursor
+                                endCursor
+                            }
+                        }
+                    }
+                }
+            }
+        """
+        
+        variables = {
+            "accountNumber": account_number,
+            "deviceId": device_id
+        }
+        
+        if not self._client:
+            raise Exception("Not authenticated")
+            
+        try:
+            response = await self._client.execute_async(query, variables)
+            
+            if "errors" in response:
+                _LOGGER.warning("Extended query failed, falling back to basic query: %s", response["errors"])
+                # Fallback a la consulta básica que sabemos que funciona
+                return await self.get_devices(account_number, device_id)
+                
+            return response["data"]["devices"]
+        except Exception as err:
+            _LOGGER.warning("Extended query failed, using basic query: %s", err)
+            return await self.get_devices(account_number, device_id)
+
     async def get_account_info(self, account_number: str) -> dict[str, Any]:
-        """Get account information."""
+        """Get account information - simplified based on YAML."""
         query = """
             query GetAccount($accountNumber: String!) {
                 account(accountNumber: $accountNumber) {
-                    id
+                    __typename
                     number
                     ledgers {
+                        __typename
                         ledgerType
                         balance
+                        number
+                        acceptsPayments
                     }
                     properties {
                         __typename
