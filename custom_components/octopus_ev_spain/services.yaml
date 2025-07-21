@@ -1,44 +1,71 @@
 start_boost_charge:
-  name: Start Boost Charge
-  description: Start boost charging for an EV device
+  name: Iniciar Carga Rápida
+  description: Inicia la carga rápida (boost) para un dispositivo EV
   fields:
     device_id:
-      name: Device ID
-      description: The unique identifier of the EV device
+      name: ID del Dispositivo
+      description: Identificador único del dispositivo EV
       required: true
       selector:
         text:
 
 stop_boost_charge:
-  name: Stop Boost Charge
-  description: Stop boost charging for an EV device
+  name: Detener Carga Rápida
+  description: Detiene la carga rápida (boost) para un dispositivo EV
   fields:
     device_id:
-      name: Device ID
-      description: The unique identifier of the EV device
+      name: ID del Dispositivo
+      description: Identificador único del dispositivo EV
       required: true
       selector:
         text:
 
 refresh_charger:
-  name: Refresh Charger
-  description: Refresh the EV charger data (auto-detects single charger)
+  name: Actualizar Cargador
+  description: Actualiza los datos del cargador EV (detecta automáticamente el cargador único)
 
 check_charger:
-  name: Check Charger Status  
-  description: Check charger status and notify of changes
+  name: Verificar Estado del Cargador  
+  description: Verifica el estado del cargador y notifica cambios
   fields:
     notify:
-      name: Send Notifications
-      description: Whether to send notifications if status changes
+      name: Enviar Notificaciones
+      description: Si enviar notificaciones cuando cambie el estado
       default: true
       selector:
         boolean:
 
 car_connected:
-  name: Car Connected
-  description: Handle car connection event (refreshes charger + extended monitoring)
+  name: Coche Conectado
+  description: Maneja el evento de conexión del coche (actualiza cargador + monitoreo extendido)
 
 car_disconnected:
-  name: Car Disconnected  
-  description: Handle car disconnection event (refreshes charger status)
+  name: Coche Desconectado  
+  description: Maneja el evento de desconexión del coche (actualiza estado del cargador)
+
+set_preferences:
+  name: Configurar Preferencias
+  description: Configura las preferencias de carga del dispositivo EV
+  fields:
+    device_id:
+      name: ID del Dispositivo
+      description: Identificador único del dispositivo EV
+      required: true
+      selector:
+        text:
+    max_percentage:
+      name: Porcentaje Máximo
+      description: Porcentaje máximo de carga (10-100%)
+      default: 95
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+    target_time:
+      name: Hora Objetivo
+      description: Hora a la que el coche debe estar cargado (formato HH:MM)
+      default: "10:30"
+      selector:
+        time:

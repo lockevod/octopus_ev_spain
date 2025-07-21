@@ -1,4 +1,4 @@
-"""The Octopus Energy Spain integration - CORRECTED."""
+"""The Octopus Energy Spain integration - CORRECTED for real API structure."""
 from __future__ import annotations
 
 import asyncio
@@ -24,14 +24,17 @@ from .const import (
     SERVICE_CHECK_CHARGER,
     SERVICE_CAR_CONNECTED,
     SERVICE_CAR_DISCONNECTED,
+    SERVICE_SET_PREFERENCES,
     ATTR_DEVICE_ID,
     ATTR_NOTIFY,
+    ATTR_MAX_PERCENTAGE,
+    ATTR_TARGET_TIME,
 )
 from .coordinator import OctopusSpainDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
 
-# Service schemas
+# Service schemas - CORRECTED
 START_BOOST_SERVICE_SCHEMA = vol.Schema({
     vol.Required(ATTR_DEVICE_ID): cv.string,
 })
@@ -47,6 +50,12 @@ CHECK_CHARGER_SCHEMA = vol.Schema({
 })
 
 CAR_CONNECTION_SCHEMA = vol.Schema({})
+
+SET_PREFERENCES_SCHEMA = vol.Schema({
+    vol.Required(ATTR_DEVICE_ID): cv.string,
+    vol.Optional(ATTR_MAX_PERCENTAGE, default=95): vol.All(vol.Coerce(float), vol.Range(min=10, max=100)),
+    vol.Optional(ATTR_TARGET_TIME, default="10:30"): cv.string,
+})
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -65,13 +74,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     try:
         # Test the connection
         login_success = await api.login()
-        _LOGGER.debug("Login successful for %s", email)
         if not login_success:
             raise ConfigEntryAuthFailed("Invalid authentication")
             
-        # Verify API works with corrected call
+        # Verify API works
         user_info = await api.get_user_info()
-        _LOGGER.debug("User info: %s", user_info)
+        _LOGGER.debug("User info: %s", user_info.get("email"))
         
         # Get accounts to verify API works
         accounts = await api.get_account_list()
@@ -120,7 +128,6 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def _get_single_charger_id(coordinator: OctopusSpainDataUpdateCoordinator) -> str | None:
     """Get the ID of the single EV charger in the account."""
     try:
-        _LOGGER.debug("Devices data: %s", coordinator.data.get("devices"))
         for account_number, account_devices in coordinator.data.get("devices", {}).items():
             for device in account_devices:
                 if device.get("__typename") == "SmartFlexChargePoint":
@@ -137,6 +144,18 @@ async def _get_single_charger_id(coordinator: OctopusSpainDataUpdateCoordinator)
         return None
 
 
+async def _get_charger_account(coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> str | None:
+    """Get the account number for a charger device."""
+    try:
+        for account_number, account_devices in coordinator.data.get("devices", {}).items():
+            for device in account_devices:
+                if device.get("id") == device_id and device.get("__typename") == "SmartFlexChargePoint":
+                    return account_number
+        return None
+    except Exception:
+        return None
+
+
 async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpainDataUpdateCoordinator) -> None:
     """Register services."""
     
@@ -146,10 +165,12 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
         
         try:
             await coordinator.api.start_boost_charge(device_id)
-            # Wait for change to propagate
-            await asyncio.sleep(2)
-            await coordinator.async_refresh_specific_device(device_id)
             _LOGGER.info("Started boost charging for device %s", device_id)
+            
+            # Wait for change to propagate and refresh
+            await asyncio.sleep(3)
+            await coordinator.async_refresh_specific_device(device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to start boost charging for device %s: %s", device_id, err)
             raise
@@ -160,10 +181,12 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
         
         try:
             await coordinator.api.stop_boost_charge(device_id)
-            # Wait for change to propagate
-            await asyncio.sleep(2)
-            await coordinator.async_refresh_specific_device(device_id)
             _LOGGER.info("Stopped boost charging for device %s", device_id)
+            
+            # Wait for change to propagate and refresh
+            await asyncio.sleep(3)
+            await coordinator.async_refresh_specific_device(device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to stop boost charging for device %s: %s", device_id, err)
             raise
@@ -178,6 +201,7 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
                 
             await coordinator.async_refresh_specific_device(charger_device_id)
             _LOGGER.info("Charger %s data refreshed successfully", charger_device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to refresh charger data: %s", err)
             raise
@@ -192,31 +216,37 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
                 _LOGGER.warning("No EV charger found in account")
                 return
             
-            # Get current state
+            # Get current state before refresh
+            current_state_data = await coordinator.async_get_device_state(charger_device_id)
+            current_state = current_state_data.get("status", {}).get("currentState") if current_state_data else None
+            
+            # Get device info
             current_device = await coordinator.async_get_device_data(charger_device_id)
-            current_state = current_device.get("status", {}).get("currentState") if current_device else None
-            current_status = current_device.get("status", {}).get("current") if current_device else None
             device_name = current_device.get("name", "EV Charger") if current_device else "EV Charger"
             
             # Refresh the charger
             await coordinator.async_refresh_specific_device(charger_device_id)
             
-            # Get new state
-            updated_device = await coordinator.async_get_device_data(charger_device_id)
-            new_state = updated_device.get("status", {}).get("currentState") if updated_device else None
-            new_status = updated_device.get("status", {}).get("current") if updated_device else None
+            # Get new state after refresh
+            new_state_data = await coordinator.async_get_device_state(charger_device_id)
+            new_state = new_state_data.get("status", {}).get("currentState") if new_state_data else None
             
             # Log the change
-            _LOGGER.info("Charger check: %s | Status: %s → %s | State: %s → %s", 
-                        device_name, current_status, new_status, current_state, new_state)
+            _LOGGER.info("Charger check: %s | State: %s → %s", device_name, current_state, new_state)
             
-            # Notify if there are important changes
-            if notify and (current_state != new_state or current_status != new_status):
-                state_msg = f"State: {current_state} → {new_state}" if current_state != new_state else ""
-                status_msg = f"Status: {current_status} → {new_status}" if current_status != new_status else ""
+            # Notify if there are changes and notifications enabled
+            if notify and current_state != new_state:
+                state_translations = {
+                    "SMART_CONTROL_NOT_AVAILABLE": "Desconectado",
+                    "SMART_CONTROL_CAPABLE": "Conectado",
+                    "BOOSTING": "Carga Rápida",
+                    "SMART_CONTROL_IN_PROGRESS": "Carga Programada"
+                }
                 
-                message_parts = [msg for msg in [state_msg, status_msg] if msg]
-                message = " | ".join(message_parts) if message_parts else "Status updated"
+                old_translated = state_translations.get(current_state, current_state or "Desconocido")
+                new_translated = state_translations.get(new_state, new_state or "Desconocido")
+                
+                message = f"Estado cambió: {old_translated} → {new_translated}"
                 
                 # Determine icon based on state
                 icon = "🔌"
@@ -226,29 +256,27 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
                     icon = "🔄"
                 elif new_state == "SMART_CONTROL_NOT_AVAILABLE":
                     icon = "❌"
+                elif new_state == "SMART_CONTROL_CAPABLE":
+                    icon = "✅"
                 
-                hass.async_create_task(
-                    hass.services.async_call(
-                        "notify",
-                        "persistent_notification",
-                        {
-                            "title": f"{icon} {device_name}",
-                            "message": message,
-                            "notification_id": f"charger_status_{charger_device_id}",
-                        },
-                    )
+                await hass.services.async_call(
+                    "notify",
+                    "persistent_notification",
+                    {
+                        "title": f"{icon} {device_name}",
+                        "message": message,
+                        "notification_id": f"charger_status_{charger_device_id}",
+                    },
                 )
                 
-            # Fire custom events for advanced automations
+            # Fire custom event for automations
             hass.bus.async_fire("octopus_charger_checked", {
                 "device_id": charger_device_id,
                 "device_name": device_name,
                 "old_state": current_state,
                 "new_state": new_state,
-                "old_status": current_status,
-                "new_status": new_status,
                 "state_changed": current_state != new_state,
-                "status_changed": current_status != new_status,
+                "is_connected": new_state in ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"],
             })
                 
         except Exception as err:
@@ -267,7 +295,7 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
             await asyncio.sleep(10)
             
             # Second check with notification
-            await async_check_charger(ServiceCall("octopus_ev_spain", "check_charger", {ATTR_NOTIFY: True}))
+            await async_check_charger(ServiceCall("octopus_spain", "check_charger", {ATTR_NOTIFY: True}))
             
             # Fire event for automations
             hass.bus.async_fire("octopus_car_connected")
@@ -289,6 +317,69 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
             
         except Exception as err:
             _LOGGER.error("Failed to handle car disconnection: %s", err)
+            raise
+
+    async def async_set_preferences(call: ServiceCall) -> None:
+        """Set charger preferences."""
+        device_id = call.data[ATTR_DEVICE_ID]
+        max_percentage = call.data.get(ATTR_MAX_PERCENTAGE, 95)
+        target_time = call.data.get(ATTR_TARGET_TIME, "10:30")
+        
+        try:
+            # Get account for this device
+            account_number = await _get_charger_account(coordinator, device_id)
+            if not account_number:
+                raise Exception(f"No se encontró la cuenta para el dispositivo {device_id}")
+            
+            # Create schedules for all days of the week
+            days = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
+            schedules = []
+            
+            for day in days:
+                schedules.append({
+                    "dayOfWeek": day,
+                    "time": target_time,
+                    "max": float(max_percentage)
+                })
+            
+            # Set preferences
+            result = await coordinator.api.set_smart_flex_device_preferences(
+                device_id=device_id,
+                mode="CHARGE",
+                unit="PERCENTAGE", 
+                schedules=schedules
+            )
+            
+            _LOGGER.info("Updated preferences for device %s: %s%% at %s", device_id, max_percentage, target_time)
+            
+            # Refresh device data
+            await asyncio.sleep(2)
+            await coordinator.async_refresh_specific_device(device_id)
+            
+            # Send notification
+            device_data = await coordinator.async_get_device_data(device_id)
+            device_name = device_data.get("name", "Cargador EV") if device_data else "Cargador EV"
+            
+            await hass.services.async_call(
+                "notify",
+                "persistent_notification",
+                {
+                    "title": f"⚙️ {device_name}",
+                    "message": f"Preferencias actualizadas: {max_percentage}% a las {target_time}",
+                    "notification_id": f"charger_preferences_{device_id}",
+                },
+            )
+            
+            # Fire event for automations
+            hass.bus.async_fire("octopus_preferences_updated", {
+                "device_id": device_id,
+                "device_name": device_name,
+                "max_percentage": max_percentage,
+                "target_time": target_time,
+            })
+            
+        except Exception as err:
+            _LOGGER.error("Failed to set preferences for device %s: %s", device_id, err)
             raise
 
     # Register services
@@ -332,4 +423,11 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
         SERVICE_CAR_DISCONNECTED, 
         async_car_disconnected,
         schema=CAR_CONNECTION_SCHEMA,
+    )
+
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_SET_PREFERENCES,
+        async_set_preferences,
+        schema=SET_PREFERENCES_SCHEMA,
     )

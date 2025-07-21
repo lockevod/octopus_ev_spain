@@ -1,4 +1,4 @@
-"""Switch platform for Octopus Energy Spain - CORRECTED."""
+"""Switch platform for Octopus Energy Spain - SIMPLIFIED data structure."""
 from __future__ import annotations
 
 import asyncio
@@ -27,7 +27,7 @@ async def async_setup_entry(
 
     entities: list[SwitchEntity] = []
 
-    # Add boost charge switches for each device
+    # Add boost charge switches for each charger
     for account_number, devices in coordinator.data.get("devices", {}).items():
         for device in devices:
             # Only add switches for charge points
@@ -37,8 +37,27 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
+def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str, Any]:
+    """Safely create device info, handling null device data."""
+    if not device:
+        return {
+            "identifiers": {(DOMAIN, device_id)},
+            "name": "Dispositivo Desconocido",
+            "manufacturer": "Octopus Energy",
+            "model": "Desconocido",
+        }
+        
+    return {
+        "identifiers": {(DOMAIN, device_id)},
+        "name": device.get("name", "Dispositivo Desconocido"),
+        "manufacturer": "Octopus Energy",
+        "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
+        "sw_version": device.get("deviceType", "Desconocido"),
+    }
+
+
 class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch for controlling boost charging."""
+    """Switch for controlling boost charging - SIMPLIFIED structure."""
 
     def __init__(
         self,
@@ -52,96 +71,102 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        if device:
-            device_name = device.get("name", "Dispositivo Desconocido")
-            self._attr_name = f"{device_name} Carga Rápida"
-            self._attr_unique_id = f"octopus_{device_id}_boost_charge"
-            self._attr_icon = "mdi:ev-station"
+        device_name = device.get("name", "Dispositivo Desconocido") if device else "Dispositivo Desconocido"
+        self._attr_name = f"{device_name} Carga Rápida"
+        self._attr_unique_id = f"octopus_{device_id}_boost_charge"
+        self._attr_icon = "mdi:ev-station"
 
     def _get_device_data(self) -> dict[str, Any] | None:
-        """Get device data from coordinator."""
-        devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
-        for device in devices:
-            if device.get("id") == self._device_id:
-                return device
+        """Get device data from coordinator - SIMPLIFIED."""
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        except (KeyError, TypeError, AttributeError):
+            _LOGGER.warning("Failed to get device data for %s", self._device_id)
+        return None
+
+    def _get_current_state(self) -> str | None:
+        """Get current device state - SIMPLIFIED."""
+        try:
+            device = self._get_device_data()
+            if device:
+                # Status is now directly in the device data
+                return device.get("status", {}).get("currentState")
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
         device = self._get_device_data()
-        if not device:
-            return {}
-            
-        return {
-            "identifiers": {(DOMAIN, self._device_id)},
-            "name": device.get("name", "Dispositivo Desconocido"),
-            "manufacturer": "Octopus Energy",
-            "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
-            "sw_version": device.get("deviceType", "Desconocido"),
-        }
+        return _safe_device_info(self._device_id, device)
 
     @property
     def is_on(self) -> bool | None:
-        """Return if boost charging is on based on real data structure."""
-        device = self._get_device_data()
-        if not device:
-            return None
-
-        # Check if device is in BOOSTING state (this is the correct field from traces)
-        current_state = device.get("status", {}).get("currentState")
-        if current_state == "BOOSTING":
-            return True
-
-        # Also check for active charging sessions of type SMART that are still ongoing
-        sessions = device.get("chargePointChargingSession", {}).get("edges", [])
-        for session_edge in sessions:
-            session = session_edge["node"]
-            if (
-                session.get("type") == "SMART" 
-                and session.get("end") is None  # Active session (no end time)
-            ):
-                return True
-
-        return False
+        """Return if boost charging is on."""
+        current_state = self._get_current_state()
+        # Boost is ON when state is "BOOSTING"
+        return current_state == "BOOSTING"
 
     @property
     def available(self) -> bool:
         """Return if the switch is available."""
-        device = self._get_device_data()
-        if not device:
-            return False
-
-        # Check if device supports smart control (based on real states from traces)
-        current_state = device.get("status", {}).get("currentState")
-        available_states = [
-            "SMART_CONTROL_CAPABLE", 
-            "SMART_CONTROL_IN_PROGRESS", 
-            "BOOSTING"
+        current_state = self._get_current_state()
+        
+        # Switch is available when car is connected (any state except NOT_AVAILABLE)
+        connected_states = [
+            "SMART_CONTROL_CAPABLE",     # Connected, ready
+            "SMART_CONTROL_IN_PROGRESS", # Charging in scheduled session 
+            "BOOSTING"                   # Already boosting
         ]
         
-        return current_state in available_states
+        return current_state in connected_states
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Start boost charging using corrected API."""
+        """Start boost charging."""
+        current_state = self._get_current_state()
+        
+        # Check if we can start boost charging
+        if current_state == "BOOSTING":
+            _LOGGER.warning("Boost charging already active for device %s", self._device_id)
+            return
+            
+        if current_state == "SMART_CONTROL_NOT_AVAILABLE":
+            _LOGGER.error("Cannot start boost charging - car not connected to device %s", self._device_id)
+            raise Exception("Coche no conectado - no se puede iniciar carga rápida")
+        
         try:
             await self.coordinator.api.start_boost_charge(self._device_id)
-            # Wait a moment for the change to propagate
-            await asyncio.sleep(2)
-            await self.coordinator.async_refresh_specific_device(self._device_id)
             _LOGGER.info("Started boost charging for device %s", self._device_id)
+            
+            # Wait for change to propagate, then refresh
+            await asyncio.sleep(3)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to start boost charging for device %s: %s", self._device_id, err)
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Stop boost charging using corrected API."""
+        """Stop boost charging."""
+        current_state = self._get_current_state()
+        
+        # Check if boost is actually running
+        if current_state != "BOOSTING":
+            _LOGGER.warning("Boost charging not active for device %s (state: %s)", self._device_id, current_state)
+            return
+        
         try:
             await self.coordinator.api.stop_boost_charge(self._device_id)
-            # Wait a moment for the change to propagate
-            await asyncio.sleep(2)
-            await self.coordinator.async_refresh_specific_device(self._device_id)
             _LOGGER.info("Stopped boost charging for device %s", self._device_id)
+            
+            # Wait for change to propagate, then refresh
+            await asyncio.sleep(3)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to stop boost charging for device %s: %s", self._device_id, err)
             raise
@@ -150,51 +175,73 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
         device = self._get_device_data()
-        if not device:
-            return {}
-
+        current_state = self._get_current_state()
+        
         attrs = {
             "device_id": self._device_id,
             "account_number": self._account_number,
-            "device_type": device.get("deviceType"),
-            "provider": device.get("provider"),
-            "current_state": device.get("status", {}).get("currentState"),
-            "status": device.get("status", {}).get("current"),
-            "is_suspended": device.get("status", {}).get("isSuspended"),
+            "raw_state": current_state,
         }
 
-        # Add active session info from real data structure
-        sessions = device.get("chargePointChargingSession", {}).get("edges", [])
-        active_sessions = [
-            session["node"] for session in sessions 
-            if session["node"].get("end") is None
-        ]
-        
-        if active_sessions:
-            latest_session = active_sessions[0]
-            energy_data = latest_session.get("energyAdded", {})
-            cost_data = latest_session.get("cost", {})
-            
+        if device:
             attrs.update({
-                "active_session_start": latest_session.get("start"),
-                "active_session_type": latest_session.get("type"),
-                "active_session_energy_added": energy_data.get("value") if energy_data else None,
-                "active_session_energy_unit": energy_data.get("unit") if energy_data else None,
-                "active_session_cost": cost_data.get("amount") if cost_data else None,
-                "active_session_currency": cost_data.get("currency") if cost_data else None,
-                "active_session_soc_change": latest_session.get("stateOfChargeChange"),
-                "active_session_soc_final": latest_session.get("stateOfChargeFinal"),
-                "active_session_problems": len(latest_session.get("problems", [])),
+                "device_type": device.get("deviceType"),
+                "provider": device.get("provider"),
+                "property_id": device.get("propertyId"),
             })
 
-        # Add preferences info
-        preferences = device.get("preferences", {})
-        if preferences:
-            attrs.update({
-                "charging_mode": preferences.get("mode"),
-                "target_type": preferences.get("targetType"),
-                "unit": preferences.get("unit"),
-                "schedules_count": len(preferences.get("schedules", [])),
-            })
+        # Add state explanation in Spanish
+        state_explanations = {
+            "SMART_CONTROL_NOT_AVAILABLE": "Coche desconectado",
+            "SMART_CONTROL_CAPABLE": "Conectado, listo para cargar",
+            "BOOSTING": "Carga rápida activa",
+            "SMART_CONTROL_IN_PROGRESS": "Carga programada en curso"
+        }
+        
+        attrs["state_explanation"] = state_explanations.get(current_state, "Estado desconocido")
+        
+        # Add connection status
+        attrs["is_connected"] = current_state in [
+            "SMART_CONTROL_CAPABLE", 
+            "BOOSTING", 
+            "SMART_CONTROL_IN_PROGRESS"
+        ]
+        
+        # Add capabilities based on current state
+        if current_state == "SMART_CONTROL_NOT_AVAILABLE":
+            attrs["can_start_boost"] = False
+            attrs["can_stop_boost"] = False
+            attrs["reason"] = "Coche no conectado"
+        elif current_state == "SMART_CONTROL_CAPABLE":
+            attrs["can_start_boost"] = True
+            attrs["can_stop_boost"] = False
+            attrs["reason"] = "Listo para iniciar carga"
+        elif current_state == "BOOSTING":
+            attrs["can_start_boost"] = False
+            attrs["can_stop_boost"] = True
+            attrs["reason"] = "Carga rápida en progreso"
+        elif current_state == "SMART_CONTROL_IN_PROGRESS":
+            attrs["can_start_boost"] = True  # Can switch to boost from scheduled charging
+            attrs["can_stop_boost"] = False
+            attrs["reason"] = "Puede cambiar a carga rápida"
+        else:
+            attrs["can_start_boost"] = False
+            attrs["can_stop_boost"] = False
+            attrs["reason"] = "Estado desconocido"
+
+        # Add planned dispatches info - safe version
+        try:
+            dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+            if dispatches and attrs["is_connected"]:
+                attrs["planned_sessions"] = len(dispatches)
+                if dispatches:
+                    next_dispatch = dispatches[0]
+                    attrs["next_session_start"] = next_dispatch.get("start")
+                    attrs["next_session_end"] = next_dispatch.get("end")
+            elif attrs["is_connected"]:
+                attrs["planned_sessions"] = 0
+                attrs["reason"] += " (sin sesiones programadas)"
+        except (KeyError, TypeError, AttributeError):
+            attrs["planned_sessions"] = 0
 
         return attrs
