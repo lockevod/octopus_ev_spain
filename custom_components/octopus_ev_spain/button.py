@@ -1,6 +1,7 @@
-"""Button platform for Octopus Energy Spain."""
+"""Button platform for Octopus Energy Spain - CORRECTED."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -59,8 +60,16 @@ class OctopusDeviceButton(CoordinatorEntity, ButtonEntity):
         
         device = self._get_device_data()
         if device:
-            device_name = device.get("name", "Unknown Device")
-            self._attr_name = f"{device_name} {button_type.replace('_', ' ').title()}"
+            device_name = device.get("name", "Dispositivo Desconocido")
+            
+            button_names = {
+                "start_boost": "Iniciar Carga Rápida",
+                "stop_boost": "Detener Carga Rápida", 
+                "refresh_data": "Actualizar Datos"
+            }
+            
+            button_name = button_names.get(button_type, button_type.replace('_', ' ').title())
+            self._attr_name = f"{device_name} {button_name}"
             self._attr_unique_id = f"octopus_{device_id}_{button_type}"
 
     def _get_device_data(self) -> dict[str, Any] | None:
@@ -80,10 +89,10 @@ class OctopusDeviceButton(CoordinatorEntity, ButtonEntity):
             
         return {
             "identifiers": {(DOMAIN, self._device_id)},
-            "name": device.get("name", "Unknown Device"),
+            "name": device.get("name", "Dispositivo Desconocido"),
             "manufacturer": "Octopus Energy",
-            "model": f"{device.get('__typename', 'Unknown')} ({device.get('deviceType', 'Unknown')})",
-            "sw_version": device.get("provider"),
+            "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
+            "sw_version": device.get("deviceType", "Desconocido"),
         }
 
 
@@ -109,14 +118,19 @@ class OctopusStartBoostButton(OctopusDeviceButton):
 
         # Only available if device is capable and not already boosting
         current_state = device.get("status", {}).get("currentState")
-        return current_state in ["SMART_CONTROL_CAPABLE", "SMART_CONTROL_IN_PROGRESS"]
+        available_states = ["SMART_CONTROL_CAPABLE", "SMART_CONTROL_IN_PROGRESS"]
+        return current_state in available_states
 
     async def async_press(self) -> None:
         """Handle the button press."""
         try:
             await self.coordinator.api.start_boost_charge(self._device_id)
-            await self.coordinator.async_request_refresh()
             _LOGGER.info("Started boost charging for device %s", self._device_id)
+            
+            # Wait a moment for the change to propagate
+            await asyncio.sleep(2)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to start boost charging for device %s: %s", self._device_id, err)
             raise
@@ -150,8 +164,12 @@ class OctopusStopBoostButton(OctopusDeviceButton):
         """Handle the button press."""
         try:
             await self.coordinator.api.stop_boost_charge(self._device_id)
-            await self.coordinator.async_request_refresh()
             _LOGGER.info("Stopped boost charging for device %s", self._device_id)
+            
+            # Wait a moment for the change to propagate
+            await asyncio.sleep(2)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
+            
         except Exception as err:
             _LOGGER.error("Failed to stop boost charging for device %s: %s", self._device_id, err)
             raise

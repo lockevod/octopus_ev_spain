@@ -1,4 +1,4 @@
-"""Data update coordinator for Octopus Energy Spain."""
+"""Data update coordinator for Octopus Energy Spain - CORRECTED."""
 from __future__ import annotations
 
 import asyncio
@@ -17,7 +17,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
-    """Class to manage fetching data from the API with selective refresh."""
+    """Class to manage fetching data from the API with corrected structure."""
 
     def __init__(
         self,
@@ -90,7 +90,7 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
         return current_data
 
     async def async_refresh_specific_device(self, device_id: str) -> None:
-        """Refresh data for a specific device."""
+        """Refresh data for a specific device using corrected API calls."""
         _LOGGER.info("Manual refresh of device %s requested", device_id)
         try:
             # If no initial data, perform full refresh first
@@ -105,6 +105,7 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                 await self.async_request_refresh()
                 return
                 
+            # Use the corrected API method
             device_data = await self.api.get_devices(account, device_id)
             
             # Update only this device in the data
@@ -136,7 +137,7 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
             raise
 
     async def _refresh_all_data(self) -> dict[str, Any]:
-        """Refresh all data types."""
+        """Refresh all data types using corrected API calls."""
         try:
             # Get viewer info and accounts
             viewer_info = await self.api.get_viewer_info()
@@ -153,41 +154,40 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
             # Fetch data for each account
             for account_number in self.accounts:
                 try:
-                    # Account info
+                    # Account info (ledgers + properties)
                     account_data = await self.api.get_account_info(account_number)
                     data["accounts"][account_number] = account_data
                     
-                    # Devices
+                    # Devices with enhanced info
                     devices = await self.api.get_devices(account_number)
                     data["devices"][account_number] = devices
                     
-                    # Flex dispatches
-                    try:
-                        flex_dispatches = await self.api.get_flex_planned_dispatches(account_number)
-                        data["flex_dispatches"][account_number] = flex_dispatches
-                    except Exception:
-                        data["flex_dispatches"][account_number] = []
+                    # For each device, get additional info
+                    for device in devices:
+                        device_id = device.get("id")
+                        if device_id and device.get("__typename") == "SmartFlexChargePoint":
+                            try:
+                                # Get planned dispatches
+                                flex_dispatches = await self.api.flex_planned_dispatches(device_id)
+                                data["flex_dispatches"][device_id] = flex_dispatches
+                            except Exception as err:
+                                _LOGGER.warning("Failed to get flex dispatches for device %s: %s", device_id, err)
+                                data["flex_dispatches"][device_id] = []
 
                     # Property measurements
-                    for device in devices:
-                        property_id = device.get("propertyId")
+                    for property_data in account_data.get("properties", []):
+                        property_id = property_data.get("id")
                         if property_id and property_id not in data["measurements"]:
                             try:
-                                end_time = datetime.now()
-                                start_time = end_time - timedelta(hours=24)
-                                
-                                measurements = await self.api.get_property_measurements(
-                                    int(property_id),
-                                    start_time.isoformat(),
-                                    end_time.isoformat()
-                                )
+                                measurements = await self.api.get_smart_usage(property_id)
                                 data["measurements"][property_id] = measurements
-                            except Exception:
-                                data["measurements"][property_id] = {"measurements": []}
+                            except Exception as err:
+                                _LOGGER.warning("Failed to get measurements for property %s: %s", property_id, err)
+                                data["measurements"][property_id] = {"measurements": {"edges": []}}
 
                 except Exception as err:
                     _LOGGER.error("Failed to fetch data for account %s: %s", account_number, err)
-                    data["accounts"][account_number] = {}
+                    data["accounts"][account_number] = {"ledgers": [], "properties": []}
                     data["devices"][account_number] = []
 
             # Update timestamps
@@ -204,7 +204,7 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
             raise UpdateFailed(f"Error communicating with API: {err}") from err
 
     async def _refresh_devices_data(self) -> dict[str, Any]:
-        """Refresh only devices data."""
+        """Refresh only devices data using corrected API calls."""
         devices_data = {"devices": {}}
         
         for account_number in self.accounts:
@@ -218,7 +218,7 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
         return devices_data
 
     async def _refresh_account_data(self) -> dict[str, Any]:
-        """Refresh only account data."""
+        """Refresh only account data using corrected API calls."""
         account_data = {"accounts": {}}
         
         for account_number in self.accounts:
@@ -227,36 +227,29 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                 account_data["accounts"][account_number] = account_info
             except Exception as err:
                 _LOGGER.error("Failed to fetch account info for %s: %s", account_number, err)
-                account_data["accounts"][account_number] = {}
+                account_data["accounts"][account_number] = {"ledgers": [], "properties": []}
         
         return account_data
 
     async def _refresh_measurements_data(self) -> dict[str, Any]:
-        """Refresh only measurements data."""
+        """Refresh only measurements data using corrected API calls."""
         measurements_data = {"measurements": {}}
         
-        # Get unique property IDs from current devices
+        # Get unique property IDs from current accounts
         property_ids = set()
-        for devices in self.data.get("devices", {}).values():
-            for device in devices:
-                property_id = device.get("propertyId")
+        for account_data in self.data.get("accounts", {}).values():
+            for property_data in account_data.get("properties", []):
+                property_id = property_data.get("id")
                 if property_id:
                     property_ids.add(property_id)
         
         for property_id in property_ids:
             try:
-                end_time = datetime.now()
-                start_time = end_time - timedelta(hours=24)
-                
-                measurements = await self.api.get_property_measurements(
-                    int(property_id),
-                    start_time.isoformat(),
-                    end_time.isoformat()
-                )
+                measurements = await self.api.get_smart_usage(property_id)
                 measurements_data["measurements"][property_id] = measurements
             except Exception as err:
                 _LOGGER.error("Failed to fetch measurements for property %s: %s", property_id, err)
-                measurements_data["measurements"][property_id] = {"measurements": []}
+                measurements_data["measurements"][property_id] = {"measurements": {"edges": []}}
         
         return measurements_data
 

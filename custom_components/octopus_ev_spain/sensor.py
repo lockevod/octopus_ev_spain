@@ -1,4 +1,4 @@
-"""Sensor platform for Octopus Energy Spain."""
+"""Sensor platform for Octopus Energy Spain - CORRECTED based on real data structure."""
 from __future__ import annotations
 
 import logging
@@ -41,14 +41,14 @@ async def async_setup_entry(
     for account_number in coordinator.accounts:
         account_data = coordinator.data.get("accounts", {}).get(account_number, {})
         
-        # Add ledger sensors
+        # Add ledger sensors (balance sensors)
         for ledger in account_data.get("ledgers", []):
             entities.append(OctopusLedgerSensor(coordinator, account_number, ledger))
 
         # Add account info sensors
         entities.extend([
             OctopusAccountSensor(coordinator, account_number, "properties_count"),
-            OctopusAccountSensor(coordinator, account_number, "billing_address"),
+            OctopusAccountSensor(coordinator, account_number, "address"),
         ])
 
     # Device sensors
@@ -60,15 +60,20 @@ async def async_setup_entry(
             entities.extend([
                 OctopusDeviceSensor(coordinator, account_number, device_id, "status"),
                 OctopusDeviceSensor(coordinator, account_number, device_id, "current_state"),
-                OctopusDeviceSensor(coordinator, account_number, device_id, "charging_sessions"),
+                OctopusDeviceSensor(coordinator, account_number, device_id, "charging_sessions_count"),
                 OctopusDeviceSensor(coordinator, account_number, device_id, "last_energy_added"),
                 OctopusDeviceSensor(coordinator, account_number, device_id, "last_session_cost"),
+                OctopusDeviceSensor(coordinator, account_number, device_id, "last_soc_final"),
                 OctopusDeviceSensor(coordinator, account_number, device_id, "charging_mode"),
+                OctopusDeviceSensor(coordinator, account_number, device_id, "scheduled_charges"),
             ])
 
-    # Measurements sensors
+    # Property measurements sensors
     for property_id, measurements_data in coordinator.data.get("measurements", {}).items():
-        entities.append(OctopusPropertySensor(coordinator, property_id, "consumption"))
+        entities.extend([
+            OctopusPropertySensor(coordinator, property_id, "daily_consumption"),
+            OctopusPropertySensor(coordinator, property_id, "total_measurements"),
+        ])
 
     async_add_entities(entities)
 
@@ -88,12 +93,21 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
         self._ledger = ledger
         self._ledger_type = ledger["ledgerType"]
         
-        ledger_name = self._ledger_type.replace("_", " ").title()
-        self._attr_name = f"Octopus {ledger_name} Balance"
+        # Create friendly names
+        ledger_names = {
+            "SPAIN_ELECTRICITY_LEDGER": "Electricidad",
+            "SPAIN_GAS_LEDGER": "Gas", 
+            "SOLAR_WALLET_LEDGER": "Monedero Solar"
+        }
+        
+        ledger_name = ledger_names.get(self._ledger_type, self._ledger_type.replace("_", " ").title())
+        self._attr_name = f"Octopus {ledger_name} Saldo"
         self._attr_unique_id = f"octopus_{account_number}_{self._ledger_type.lower()}_balance"
         self._attr_native_unit_of_measurement = CURRENCY_EURO
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_icon = "mdi:wallet"
+        
         _LOGGER.debug("Initialized ledger sensor %s", self._attr_unique_id)
 
     @property
@@ -102,6 +116,7 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
         account_data = self.coordinator.data.get("accounts", {}).get(self._account_number, {})
         for ledger in account_data.get("ledgers", []):
             if ledger["ledgerType"] == self._ledger_type:
+                # Balance is in cents, convert to euros
                 return float(ledger["balance"]) / 100
         return None
 
@@ -111,33 +126,21 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
         account_data = self.coordinator.data.get("accounts", {}).get(self._account_number, {})
         for ledger in account_data.get("ledgers", []):
             if ledger["ledgerType"] == self._ledger_type:
-                attrs = {
+                return {
                     "ledger_number": ledger.get("number"),
                     "accepts_payments": ledger.get("acceptsPayments"),
                     "account_number": self._account_number,
+                    "ledger_type": self._ledger_type,
                 }
-                
-                # Add last statement info
-                statements = ledger.get("statements", {}).get("edges", [])
-                if statements:
-                    last_statement = statements[0]["node"]
-                    attrs.update({
-                        "last_statement_amount": last_statement.get("amount"),
-                        "last_statement_issued": last_statement.get("issuedDate"),
-                        "last_statement_period_start": last_statement.get("consumptionStartDate"),
-                        "last_statement_period_end": last_statement.get("consumptionEndDate"),
-                    })
-                
-                return attrs
         return {}
 
     @property
     def device_info(self) -> dict[str, Any]:
         return {
             "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus EV Energy",
-            "manufacturer": "Octopus EV Energy",
-            "model": "Spain EV API",
+            "name": "Octopus Energy España",
+            "manufacturer": "Octopus Energy",
+            "model": "API España",
         }
 
 
@@ -159,18 +162,35 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
         
         device = self._get_device_data()
         if device:
-            device_name = device.get("name", "Unknown Device")
-            self._attr_name = f"{device_name} {sensor_type.replace('_', ' ').title()}"
+            device_name = device.get("name", "Dispositivo Desconocido")
+            sensor_name = sensor_type.replace('_', ' ').title()
+            self._attr_name = f"{device_name} {sensor_name}"
             self._attr_unique_id = f"octopus_{device_id}_{sensor_type}"
             
             # Set appropriate attributes based on sensor type
             if sensor_type == "last_energy_added":
                 self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
                 self._attr_device_class = SensorDeviceClass.ENERGY
-                self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+                self._attr_state_class = SensorStateClass.TOTAL
+                self._attr_icon = "mdi:lightning-bolt"
             elif sensor_type == "last_session_cost":
                 self._attr_native_unit_of_measurement = CURRENCY_EURO
                 self._attr_device_class = SensorDeviceClass.MONETARY
+                self._attr_icon = "mdi:currency-eur"
+            elif sensor_type == "last_soc_final":
+                self._attr_native_unit_of_measurement = PERCENTAGE
+                self._attr_device_class = SensorDeviceClass.BATTERY
+                self._attr_icon = "mdi:battery"
+            elif sensor_type == "current_state":
+                self._attr_icon = "mdi:state-machine"
+            elif sensor_type == "status":
+                self._attr_icon = "mdi:information"
+            elif sensor_type == "charging_sessions_count":
+                self._attr_icon = "mdi:counter"
+            elif sensor_type == "charging_mode":
+                self._attr_icon = "mdi:tune"
+            elif sensor_type == "scheduled_charges":
+                self._attr_icon = "mdi:calendar-clock"
 
     def _get_device_data(self) -> dict[str, Any] | None:
         """Get device data from coordinator."""
@@ -183,41 +203,66 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
-        # Attach all device sensors to central integration device
+        device = self._get_device_data()
+        if not device:
+            return {}
+            
         return {
-            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus EV Energy",
-            "manufacturer": "Octopus EV Energy",
-            "model": "Spain API",
+            "identifiers": {(DOMAIN, self._device_id)},
+            "name": device.get("name", "Dispositivo Desconocido"),
+            "manufacturer": "Octopus Energy",
+            "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
+            "sw_version": device.get("deviceType", "Desconocido"),
         }
 
     @property
     def native_value(self) -> Any:
-        """Return the sensor value."""
+        """Return the sensor value based on real data structure."""
         device = self._get_device_data()
         if not device:
             return None
 
         if self._sensor_type == "status":
             return device.get("status", {}).get("current")
+        
         elif self._sensor_type == "current_state":
             return device.get("status", {}).get("currentState")
-        elif self._sensor_type == "charging_sessions":
+        
+        elif self._sensor_type == "charging_sessions_count":
             sessions = device.get("chargePointChargingSession", {}).get("edges", [])
             return len(sessions)
+        
         elif self._sensor_type == "last_energy_added":
             sessions = device.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
                 energy_data = sessions[0]["node"].get("energyAdded", {})
-                return float(energy_data.get("value", 0)) if energy_data.get("value") else None
+                value = energy_data.get("value")
+                return float(value) if value else None
+            return None
+        
         elif self._sensor_type == "last_session_cost":
             sessions = device.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
-                cost = sessions[0]["node"].get("cost")
-                return float(cost) if cost else None
+                cost_data = sessions[0]["node"].get("cost", {})
+                amount = cost_data.get("amount")
+                return float(amount) if amount else None
+            return None
+        
+        elif self._sensor_type == "last_soc_final":
+            sessions = device.get("chargePointChargingSession", {}).get("edges", [])
+            if sessions:
+                soc_final = sessions[0]["node"].get("stateOfChargeFinal")
+                return float(soc_final) if soc_final else None
+            return None
+        
         elif self._sensor_type == "charging_mode":
             preferences = device.get("preferences", {})
             return preferences.get("mode")
+        
+        elif self._sensor_type == "scheduled_charges":
+            preferences = device.get("preferences", {})
+            schedules = preferences.get("schedules", [])
+            return len(schedules)
 
         return None
 
@@ -236,7 +281,7 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
             "account_number": self._account_number,
         }
 
-        if self._sensor_type == "charging_sessions":
+        if self._sensor_type == "charging_sessions_count":
             sessions = device.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
                 latest_session = sessions[0]["node"]
@@ -245,18 +290,17 @@ class OctopusDeviceSensor(CoordinatorEntity, SensorEntity):
                     "latest_end": latest_session.get("end"),
                     "latest_type": latest_session.get("type"),
                     "latest_soc_change": latest_session.get("stateOfChargeChange"),
-                    "latest_soc_final": latest_session.get("stateOfChargeFinal"),
                     "latest_problems": len(latest_session.get("problems", [])),
                 })
 
-        # Add preferences info
-        preferences = device.get("preferences", {})
-        if preferences:
-            attrs.update({
-                "target_type": preferences.get("targetType"),
-                "unit": preferences.get("unit"),
-                "schedules_count": len(preferences.get("schedules", [])),
-            })
+        elif self._sensor_type == "charging_mode":
+            preferences = device.get("preferences", {})
+            if preferences:
+                attrs.update({
+                    "target_type": preferences.get("targetType"),
+                    "unit": preferences.get("unit"),
+                    "schedules": preferences.get("schedules", []),
+                })
 
         return attrs
 
@@ -275,8 +319,15 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
         self._account_number = account_number
         self._sensor_type = sensor_type
         
-        self._attr_name = f"Octopus {sensor_type.replace('_', ' ').title()}"
+        sensor_names = {
+            "properties_count": "Número de Propiedades",
+            "address": "Dirección Principal"
+        }
+        
+        self._attr_name = f"Octopus {sensor_names.get(sensor_type, sensor_type.replace('_', ' ').title())}"
         self._attr_unique_id = f"octopus_{account_number}_{sensor_type}"
+        self._attr_icon = "mdi:home" if sensor_type == "properties_count" else "mdi:map-marker"
+        
         _LOGGER.debug("Initialized account sensor %s", self._attr_unique_id)
 
     @property
@@ -286,15 +337,12 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
         
         if self._sensor_type == "properties_count":
             return len(account_data.get("properties", []))
-        elif self._sensor_type == "billing_address":
-            address_lines = [
-                account_data.get("billingAddressLine1"),
-                account_data.get("billingAddressLine2"),
-                account_data.get("billingAddressLine3"),
-                account_data.get("billingAddressLine4"),
-                account_data.get("billingAddressLine5"),
-            ]
-            return ", ".join(filter(None, address_lines))
+        
+        elif self._sensor_type == "address":
+            properties = account_data.get("properties", [])
+            if properties:
+                return properties[0].get("address", "No disponible")
+            return "No disponible"
 
         return None
 
@@ -305,8 +353,6 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
         
         attrs = {
             "account_number": self._account_number,
-            "billing_name": account_data.get("billingName"),
-            "billing_postcode": account_data.get("billingAddressPostcode"),
         }
 
         if self._sensor_type == "properties_count":
@@ -321,17 +367,27 @@ class OctopusAccountSensor(CoordinatorEntity, SensorEntity):
                     for prop in properties
                 ]
 
+        elif self._sensor_type == "address":
+            properties = account_data.get("properties", [])
+            if properties:
+                prop = properties[0]
+                attrs.update({
+                    "property_id": prop.get("id"),
+                    "postcode": prop.get("postcode"),
+                    "split_address": prop.get("splitAddress", []),
+                    "occupancy_periods": prop.get("occupancyPeriods", []),
+                })
+
         return attrs
 
     @property
     def device_info(self) -> dict[str, Any]:
         """Return device information."""
-        # Attach account sensors to central integration device
         return {
             "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus EV Energy",
-            "manufacturer": "Octopus EV Energy",
-            "model": "Spain API",
+            "name": "Octopus Energy España",
+            "manufacturer": "Octopus Energy",
+            "model": "API España",
         }
 
 
@@ -348,23 +404,40 @@ class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
         self._property_id = property_id
         self._sensor_type = sensor_type
         
-        self._attr_name = f"Property {property_id} {sensor_type.title()}"
+        sensor_names = {
+            "daily_consumption": "Consumo Diario",
+            "total_measurements": "Total Mediciones"
+        }
+        
+        self._attr_name = f"Propiedad {property_id} {sensor_names.get(sensor_type, sensor_type.title())}"
         self._attr_unique_id = f"octopus_property_{property_id}_{sensor_type}"
-        self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
-        self._attr_device_class = SensorDeviceClass.ENERGY
-        self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+        
+        if sensor_type == "daily_consumption":
+            self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
+            self._attr_device_class = SensorDeviceClass.ENERGY
+            self._attr_state_class = SensorStateClass.TOTAL_INCREASING
+            self._attr_icon = "mdi:flash"
+        else:
+            self._attr_icon = "mdi:counter"
+            
         _LOGGER.debug("Initialized property sensor %s", self._attr_unique_id)
 
     @property
     def native_value(self) -> float | None:
-        """Return the latest measurement value."""
+        """Return the measurement value."""
         measurements_data = self.coordinator.data.get("measurements", {}).get(self._property_id, {})
         measurements = measurements_data.get("measurements", {}).get("edges", [])
         
-        if measurements:
-            # Return the latest measurement
-            latest = measurements[-1]["node"]
-            return float(latest.get("value", 0))
+        if self._sensor_type == "daily_consumption":
+            if measurements:
+                # Return the latest measurement
+                latest = measurements[-1]["node"]
+                value = latest.get("value")
+                return float(value) if value else None
+            return None
+            
+        elif self._sensor_type == "total_measurements":
+            return len(measurements)
         
         return None
 
@@ -385,33 +458,24 @@ class OctopusPropertySensor(CoordinatorEntity, SensorEntity):
                 "latest_measurement_start": latest.get("startAt"),
                 "latest_measurement_end": latest.get("endAt"),
                 "latest_measurement_unit": latest.get("unit"),
-                "reading_direction": latest.get("metaData", {}).get("utilityFilters", {}).get("readingDirection"),
+                "latest_measurement_type": latest.get("__typename"),
             })
-
-        # Add supply point info
-        electricity_points = measurements_data.get("electricitySupplyPoints", [])
-        gas_points = measurements_data.get("gasSupplyPoints", [])
-        
-        if electricity_points:
-            attrs["electricity_supply_points"] = [
-                {"id": point.get("id"), "cups": point.get("cups")}
-                for point in electricity_points
-            ]
-        
-        if gas_points:
-            attrs["gas_supply_points"] = [
-                {"id": point.get("id"), "cups": point.get("cups")}
-                for point in gas_points
-            ]
+            
+            # Add metadata if available
+            metadata = latest.get("metaData", {})
+            if metadata:
+                utility_filters = metadata.get("utilityFilters", {})
+                if utility_filters:
+                    attrs["reading_direction"] = utility_filters.get("readingDirection")
 
         return attrs
 
     @property
     def device_info(self) -> dict[str, Any]:
-            """Attach property sensors to central integration device."""
-            return {
-                "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-                "name": "Octopus EV Energy",
-                "manufacturer": "Octopus EV Energy",
-                "model": "Spain API",
-            }
+        """Attach property sensors to central integration device."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy España",
+            "manufacturer": "Octopus Energy",
+            "model": "API España",
+        }

@@ -1,4 +1,4 @@
-"""Constants for Octopus Energy Spain integration."""
+"""Constants for Octopus Energy Spain integration - CORRECTED based on real traces."""
 from typing import Final
 
 DOMAIN: Final = "octopus_ev_spain"
@@ -14,11 +14,17 @@ DEFAULT_NAME: Final = "Octopus Energy Spain"
 
 # API constants
 API_ENDPOINT: Final = "https://api.oees-kraken.energy/v1/graphql/"
-SOLAR_WALLET_LEDGER: Final = "SOLAR_WALLET_LEDGER"
-ELECTRICITY_LEDGER: Final = "SPAIN_ELECTRICITY_LEDGER"
-GAS_LEDGER: Final = "SPAIN_GAS_LEDGER"
 
-# Device states
+# Ledger types (from real traces)
+SPAIN_ELECTRICITY_LEDGER: Final = "SPAIN_ELECTRICITY_LEDGER"
+SPAIN_GAS_LEDGER: Final = "SPAIN_GAS_LEDGER" 
+SOLAR_WALLET_LEDGER: Final = "SOLAR_WALLET_LEDGER"
+
+# Legacy constants for backward compatibility
+ELECTRICITY_LEDGER: Final = SPAIN_ELECTRICITY_LEDGER
+GAS_LEDGER: Final = SPAIN_GAS_LEDGER
+
+# Device states (from real traces)
 DEVICE_STATES = [
     "SMART_CONTROL_NOT_AVAILABLE",
     "SMART_CONTROL_IN_PROGRESS", 
@@ -26,7 +32,7 @@ DEVICE_STATES = [
     "SMART_CONTROL_CAPABLE"
 ]
 
-# Device types
+# Device types (from real traces)
 DEVICE_TYPE_CHARGE_POINT = "SmartFlexChargePoint"
 DEVICE_TYPE_VEHICLE = "SmartFlexVehicle"
 
@@ -44,3 +50,14 @@ SERVICE_CAR_DISCONNECTED = "car_disconnected"
 # Attributes
 ATTR_DEVICE_ID = "device_id"
 ATTR_NOTIFY = "notify"
+
+# Charging session types (from real traces)
+CHARGING_SESSION_TYPES = [
+    "SMART",
+    "BOOST", 
+    "PUBLIC"
+]
+
+# Boost charge actions (from real traces)
+BOOST_ACTION_START = "BOOST"
+BOOST_ACTION_STOP = "CANCEL"

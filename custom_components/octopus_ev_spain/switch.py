@@ -1,6 +1,7 @@
-"""Switch platform for Octopus Energy Spain."""
+"""Switch platform for Octopus Energy Spain - CORRECTED."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -52,8 +53,8 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         
         device = self._get_device_data()
         if device:
-            device_name = device.get("name", "Unknown Device")
-            self._attr_name = f"{device_name} Boost Charge"
+            device_name = device.get("name", "Dispositivo Desconocido")
+            self._attr_name = f"{device_name} Carga Rápida"
             self._attr_unique_id = f"octopus_{device_id}_boost_charge"
             self._attr_icon = "mdi:ev-station"
 
@@ -74,31 +75,31 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
             
         return {
             "identifiers": {(DOMAIN, self._device_id)},
-            "name": device.get("name", "Unknown Device"),
+            "name": device.get("name", "Dispositivo Desconocido"),
             "manufacturer": "Octopus Energy",
-            "model": f"{device.get('__typename', 'Unknown')} ({device.get('deviceType', 'Unknown')})",
-            "sw_version": device.get("provider"),
+            "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
+            "sw_version": device.get("deviceType", "Desconocido"),
         }
 
     @property
     def is_on(self) -> bool | None:
-        """Return if boost charging is on."""
+        """Return if boost charging is on based on real data structure."""
         device = self._get_device_data()
         if not device:
             return None
 
-        # Check if device is in BOOSTING state
+        # Check if device is in BOOSTING state (this is the correct field from traces)
         current_state = device.get("status", {}).get("currentState")
         if current_state == "BOOSTING":
             return True
 
-        # Also check for active charging sessions of type SMART
+        # Also check for active charging sessions of type SMART that are still ongoing
         sessions = device.get("chargePointChargingSession", {}).get("edges", [])
         for session_edge in sessions:
             session = session_edge["node"]
             if (
                 session.get("type") == "SMART" 
-                and session.get("end") is None  # Active session
+                and session.get("end") is None  # Active session (no end time)
             ):
                 return True
 
@@ -111,25 +112,35 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         if not device:
             return False
 
-        # Check if device supports smart control
+        # Check if device supports smart control (based on real states from traces)
         current_state = device.get("status", {}).get("currentState")
-        return current_state in ["SMART_CONTROL_CAPABLE", "SMART_CONTROL_IN_PROGRESS", "BOOSTING"]
+        available_states = [
+            "SMART_CONTROL_CAPABLE", 
+            "SMART_CONTROL_IN_PROGRESS", 
+            "BOOSTING"
+        ]
+        
+        return current_state in available_states
 
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Start boost charging."""
+        """Start boost charging using corrected API."""
         try:
             await self.coordinator.api.start_boost_charge(self._device_id)
-            await self.coordinator.async_request_refresh()
+            # Wait a moment for the change to propagate
+            await asyncio.sleep(2)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
             _LOGGER.info("Started boost charging for device %s", self._device_id)
         except Exception as err:
             _LOGGER.error("Failed to start boost charging for device %s: %s", self._device_id, err)
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Stop boost charging."""
+        """Stop boost charging using corrected API."""
         try:
             await self.coordinator.api.stop_boost_charge(self._device_id)
-            await self.coordinator.async_request_refresh()
+            # Wait a moment for the change to propagate
+            await asyncio.sleep(2)
+            await self.coordinator.async_refresh_specific_device(self._device_id)
             _LOGGER.info("Stopped boost charging for device %s", self._device_id)
         except Exception as err:
             _LOGGER.error("Failed to stop boost charging for device %s: %s", self._device_id, err)
@@ -152,7 +163,7 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
             "is_suspended": device.get("status", {}).get("isSuspended"),
         }
 
-        # Add active session info
+        # Add active session info from real data structure
         sessions = device.get("chargePointChargingSession", {}).get("edges", [])
         active_sessions = [
             session["node"] for session in sessions 
@@ -161,12 +172,29 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         
         if active_sessions:
             latest_session = active_sessions[0]
+            energy_data = latest_session.get("energyAdded", {})
+            cost_data = latest_session.get("cost", {})
+            
             attrs.update({
                 "active_session_start": latest_session.get("start"),
                 "active_session_type": latest_session.get("type"),
-                "active_session_energy_added": latest_session.get("energyAdded", {}).get("value"),
-                "active_session_cost": latest_session.get("cost"),
+                "active_session_energy_added": energy_data.get("value") if energy_data else None,
+                "active_session_energy_unit": energy_data.get("unit") if energy_data else None,
+                "active_session_cost": cost_data.get("amount") if cost_data else None,
+                "active_session_currency": cost_data.get("currency") if cost_data else None,
                 "active_session_soc_change": latest_session.get("stateOfChargeChange"),
+                "active_session_soc_final": latest_session.get("stateOfChargeFinal"),
+                "active_session_problems": len(latest_session.get("problems", [])),
+            })
+
+        # Add preferences info
+        preferences = device.get("preferences", {})
+        if preferences:
+            attrs.update({
+                "charging_mode": preferences.get("mode"),
+                "target_type": preferences.get("targetType"),
+                "unit": preferences.get("unit"),
+                "schedules_count": len(preferences.get("schedules", [])),
             })
 
         return attrs

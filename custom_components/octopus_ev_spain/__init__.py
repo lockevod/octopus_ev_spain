@@ -1,4 +1,4 @@
-"""The Octopus Energy Spain integration."""
+"""The Octopus Energy Spain integration - CORRECTED."""
 from __future__ import annotations
 
 import asyncio
@@ -69,10 +69,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if not login_success:
             raise ConfigEntryAuthFailed("Invalid authentication")
             
-        viewer_info = await api.get_viewer_info()
-        _LOGGER.debug("Viewer info: %s", viewer_info)
+        # Verify API works with corrected call
+        user_info = await api.get_user_info()
+        _LOGGER.debug("User info: %s", user_info)
+        
         # Get accounts to verify API works
-        if not viewer_info.get("accounts"):
+        accounts = await api.get_account_list()
+        if not accounts:
             raise ConfigEntryNotReady("No accounts found")
             
     except Exception as err:
@@ -91,7 +94,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
     # Fetch initial data
     await coordinator.async_config_entry_first_refresh()
-    _LOGGER.debug("Initial coordinator data: %s", coordinator.data)
+    _LOGGER.debug("Initial coordinator data keys: %s", list(coordinator.data.keys()) if coordinator.data else "None")
 
     # Store coordinator
     hass.data.setdefault(DOMAIN, {})[entry.entry_id] = coordinator
@@ -143,7 +146,9 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
         
         try:
             await coordinator.api.start_boost_charge(device_id)
-            await coordinator.async_request_refresh()
+            # Wait for change to propagate
+            await asyncio.sleep(2)
+            await coordinator.async_refresh_specific_device(device_id)
             _LOGGER.info("Started boost charging for device %s", device_id)
         except Exception as err:
             _LOGGER.error("Failed to start boost charging for device %s: %s", device_id, err)
@@ -155,7 +160,9 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
         
         try:
             await coordinator.api.stop_boost_charge(device_id)
-            await coordinator.async_request_refresh()
+            # Wait for change to propagate
+            await asyncio.sleep(2)
+            await coordinator.async_refresh_specific_device(device_id)
             _LOGGER.info("Stopped boost charging for device %s", device_id)
         except Exception as err:
             _LOGGER.error("Failed to stop boost charging for device %s: %s", device_id, err)
