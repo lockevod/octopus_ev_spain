@@ -75,15 +75,17 @@ async def async_setup_entry(
             device_type = device.get("__typename")
             
             if device_type == "SmartFlexChargePoint":
-                # Add charger-specific sensors (order: dirección, contrato, estado, planificada, última carga)
+                # Add charger-specific sensors (order: contrato, dirección, estado, planificada, fecha, duración, energía, coste)
                 entities.extend([
-                    # NEW: Reference sensors for contract info in charger device
+                    # NEW: Reference sensors for contract info in charger device (FIRST)
                     OctopusChargerContractReferenceSensor(coordinator, account_number, device_id),
                     OctopusChargerAddressReferenceSensor(coordinator, account_number, device_id),
                     OctopusDeviceStateSensor(coordinator, account_number, device_id),
                     OctopusChargerPlannedDispatchesSensor(coordinator, device_id),
-                    OctopusChargerLastEnergyAddedSensor(coordinator, device_id),
+                    # NEW: Date of last charge session
+                    OctopusChargerLastSessionDateSensor(coordinator, device_id),
                     OctopusChargerLastSessionDurationSensor(coordinator, device_id),
+                    OctopusChargerLastEnergyAddedSensor(coordinator, device_id),
                     OctopusChargerLastSessionCostSensor(coordinator, device_id),
                     # REMOVED: OctopusChargerPreferencesSensor - no aporta valor según usuario
                 ])
@@ -651,6 +653,83 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         """Return device information."""
         device = self._get_device_data()
         return _safe_device_info(self._device_id, device)
+
+
+class OctopusChargerLastSessionDateSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for last charging session date - NEW SENSOR."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Cargador") if device else "Cargador"
+        self._attr_name = f"{device_name} Fecha Última Carga"
+        self._attr_unique_id = f"octopus_{device_id}_last_session_date"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:calendar-clock"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        for devices in self.coordinator.data.get("devices", {}).values():
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        return None
+
+    def _get_last_session(self) -> dict[str, Any] | None:
+        """Get last session data - FIXED to match API structure."""
+        history_data = self.coordinator.data.get("charge_history", {}).get(self._device_id, [])
+        if history_data and len(history_data) > 0:
+            # history_data[0] is the device, get its charging sessions
+            device_data = history_data[0]
+            sessions = device_data.get("chargePointChargingSession", {}).get("edges", [])
+            if sessions:
+                return sessions[0]["node"]
+        return None
+
+    @property
+    def native_value(self) -> datetime | None:
+        last_session = self._get_last_session()
+        if last_session:
+            start_time = last_session.get("start")
+            if start_time:
+                try:
+                    return datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                except ValueError:
+                    pass
+        return None
+
+    @property
+    def available(self) -> bool:
+        """ALWAYS available - show None if no data."""
+        return True
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes."""
+        last_session = self._get_last_session()
+        attrs = {"device_id": self._device_id}
+        
+        if last_session:
+            start_time = last_session.get("start")
+            end_time = last_session.get("end")
+            
+            if start_time:
+                attrs["start_time"] = start_time
+            if end_time:
+                attrs["end_time"] = end_time
+                
+            # Add session type if available
+            session_type = last_session.get("type")
+            if session_type:
+                attrs["session_type"] = session_type
+        
+        return attrs
 
 
 class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):

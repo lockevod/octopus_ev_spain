@@ -245,13 +245,7 @@ class OctopusSpainAPI:
     async def get_planned_dispatches(self, device_id: str) -> list[dict[str, Any]]:
         """Get planned dispatches for a device - EXACT query from traces."""
         query = """
-            query FlexPlannedDispatches($deviceId: String!) { 
-                flexPlannedDispatches(deviceId: $deviceId) { 
-                    start 
-                    end 
-                    type 
-                } 
-            }
+            query FlexPlannedDispatches($deviceId: String!) { flexPlannedDispatches(deviceId: $deviceId) { start end type } }
         """
         
         response = await self._execute_query(query, {"deviceId": device_id})
@@ -289,50 +283,85 @@ class OctopusSpainAPI:
         return devices[0] if devices else {}
 
     async def get_charge_history(self, account_number: str, device_id: str, last: int = 5) -> list[dict[str, Any]]:
-        """Get charge history."""
+        """Get charge history - EXACT query from working traces."""
         query = """
-            query GetSmartFlexChargeHistory($accountNumber: String!, $deviceId: String, $sessionTypes: [ChargingSessionType], $last: Int, $after: DateTime!) { 
+            query GetSmartFlexChargeHistory($accountNumber: String!, $deviceId: String, $sessionTypes: [ChargingSessionType], $last: Int, $before: DateTime, $after: DateTime!) { 
                 devices(deviceId: $deviceId, accountNumber: $accountNumber) { 
                     __typename 
                     id 
-                    ... on SmartFlexChargePoint { 
-                        chargePointChargingSession: chargingSessions(sessionTypes: $sessionTypes, last: $last, after: $after) { 
+                    ... on SmartFlexVehicle { 
+                        vehicleChargingSession: chargingSessions(sessionTypes: $sessionTypes, last: $last, before: $before, after: $after) { 
                             __typename 
-                            edges { 
-                                cursor 
-                                node { 
+                            ...ChargeHistoryFragment 
+                        } 
+                    } 
+                    ... on SmartFlexChargePoint { 
+                        chargePointChargingSession: chargingSessions(sessionTypes: $sessionTypes, last: $last, before: $before, after: $after) { 
+                            __typename 
+                            ...ChargeHistoryFragment 
+                        } 
+                    } 
+                } 
+            }  
+            
+            fragment ChargeHistoryFragment on DeviceChargingSessionConnection { 
+                edges { 
+                    cursor 
+                    node { 
+                        __typename 
+                        ... on DeviceChargingSession { 
+                            __typename 
+                            start 
+                            end 
+                            stateOfChargeChange 
+                            stateOfChargeFinal 
+                            energyAdded { 
+                                value 
+                                unit 
+                            } 
+                            cost { 
+                                amount 
+                                currency 
+                            } 
+                            ... on SmartFlexChargingSession { 
+                                type 
+                                problems { 
                                     __typename 
-                                    start 
-                                    end 
-                                    stateOfChargeChange 
-                                    stateOfChargeFinal 
-                                    energyAdded { 
-                                        value 
-                                        unit 
+                                    ... on SmartFlexChargingError { 
+                                        cause 
                                     } 
-                                    cost { 
-                                        amount 
-                                        currency 
-                                    } 
-                                    ... on SmartFlexChargingSession { 
-                                        type 
+                                    ... on SmartFlexChargingTruncation { 
+                                        truncationCause 
+                                        originalAchievableStateOfCharge 
+                                        achievableStateOfCharge 
                                     } 
                                 } 
+                            } 
+                            ... on PublicChargingSession { 
+                                location 
+                                operatorImageUrl 
                             } 
                         } 
                     } 
                 } 
+                pageInfo { 
+                    hasNextPage 
+                    hasPreviousPage 
+                    startCursor 
+                    endCursor 
+                } 
             }
         """
         
-        # Get history from last 90 days
-        after_date = (datetime.now() - timedelta(days=90)).isoformat().replace('+00:00', 'Z')
+        # Get history from last 90 days - use same format as working request
+        after_date = (datetime.now() - timedelta(days=365)).strftime("%Y-%m-%dT%H:%M:%SZ")
         
         response = await self._execute_query(query, {
             "accountNumber": account_number,
             "deviceId": device_id,
             "sessionTypes": ["SMART"],
             "last": last,
+            "before": None,
             "after": after_date
         })
         return response["data"]["devices"]
