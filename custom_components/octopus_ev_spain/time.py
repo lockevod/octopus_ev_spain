@@ -1,4 +1,4 @@
-"""Time platform for Octopus Energy Spain - Target time configuration."""
+"""Time platform for Octopus Energy Spain - SIMPLIFIED."""
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +41,7 @@ async def async_setup_entry(
 
 
 def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str, Any]:
-    """Safely create device info, handling null device data."""
+    """Safely create device info."""
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
@@ -94,10 +94,9 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
         """Get device preferences."""
         try:
             preferences_data = self.coordinator.data.get("device_preferences", {}).get(self._device_id, {})
-            # Check if preferences_data has the expected structure
+            # Check structure
             if isinstance(preferences_data, dict) and "preferences" in preferences_data:
                 return preferences_data["preferences"]
-            # Sometimes the API returns preferences directly in the device
             elif isinstance(preferences_data, dict) and "schedules" in preferences_data:
                 return preferences_data
         except (KeyError, TypeError, AttributeError):
@@ -120,19 +119,29 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
                         minute = int(time_parts[1])
                         return time(hour, minute)
                     except (ValueError, IndexError):
-                        pass
+                        _LOGGER.warning("Invalid time format: %s", time_str)
         return time(10, 30)  # Default time
 
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        # Time configuration should always be available
-        return self._get_preferences() is not None
+        # Time configuration should always be available if preferences exist
+        preferences = self._get_preferences()
+        if preferences is None:
+            _LOGGER.debug("Target time unavailable for %s: no preferences", self._device_id)
+            return False
+        return True
 
     async def async_set_value(self, value: time) -> None:
         """Set the target time."""
         try:
-            # Get current preferences
+            device = self._get_device_data()
+            device_name = device.get("name", "Cargador") if device else "Cargador"
+            
+            new_time = f"{value.hour:02d}:{value.minute:02d}"
+            _LOGGER.info("Setting target time for %s to %s", device_name, new_time)
+            
+            # Get current preferences to preserve max percentage
             preferences = self._get_preferences()
             current_max = DEFAULT_MAX_PERCENTAGE
             
@@ -140,9 +149,6 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
                 schedules = preferences.get("schedules", [])
                 if schedules:
                     current_max = schedules[0].get("max", DEFAULT_MAX_PERCENTAGE)
-            
-            # Create new time string
-            new_time = f"{value.hour:02d}:{value.minute:02d}"
             
             # Create new schedules for all days
             schedules = []
@@ -161,11 +167,22 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
                 schedules=schedules
             )
             
-            _LOGGER.info("Updated target time for device %s to %s", self._device_id, new_time)
+            _LOGGER.info("Successfully updated target time for %s to %s", device_name, new_time)
             
             # Refresh data
             await asyncio.sleep(2)
             await self.coordinator.async_refresh_specific_device(self._device_id)
+            
+            # Send notification
+            await self.hass.services.async_call(
+                "notify",
+                "persistent_notification",
+                {
+                    "title": f"⏰ {device_name}",
+                    "message": f"Hora objetivo actualizada a {new_time}",
+                    "notification_id": f"charger_target_time_{self._device_id}",
+                },
+            )
             
         except Exception as err:
             _LOGGER.error("Failed to set target time for device %s: %s", self._device_id, err)
@@ -193,5 +210,10 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
                 max_percentage = schedules[0].get("max")
                 if max_percentage:
                     attrs["max_charge_percentage"] = max_percentage
+                    
+                attrs["mode"] = preferences.get("mode", "CHARGE")
+                attrs["unit"] = preferences.get("unit", "PERCENTAGE")
+        else:
+            attrs["unavailable_reason"] = "Preferencias no disponibles"
         
         return attrs

@@ -1,4 +1,4 @@
-"""Config flow for Octopus Energy Spain integration."""
+"""Config flow for Octopus Energy Spain integration - SIMPLIFIED."""
 from __future__ import annotations
 
 import logging
@@ -41,7 +41,7 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except Exception:  # pylint: disable=broad-except
-                _LOGGER.exception("Unexpected exception")
+                _LOGGER.exception("Unexpected exception during config flow")
                 errors["base"] = "unknown"
             else:
                 # Create unique ID based on email
@@ -64,25 +64,31 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         api = OctopusSpainAPI(user_input[CONF_EMAIL], user_input[CONF_PASSWORD])
 
         try:
+            # Test login
             login_success = await api.login()
             if not login_success:
-                raise InvalidAuth
+                raise InvalidAuth("Login failed")
                 
             # Try to get viewer info to verify the API works
             viewer_info = await api.get_viewer_info()
             if not viewer_info:
-                raise CannotConnect
+                raise CannotConnect("Failed to get user info")
+                
+            # Check if user has accounts
+            accounts = viewer_info.get("accounts", [])
+            if not accounts:
+                _LOGGER.warning("User %s has no accounts", viewer_info.get("email"))
                 
         except Exception as err:
             _LOGGER.error("Error validating Octopus Energy Spain credentials: %s", err)
-            if "authentication" in str(err).lower() or "unauthorized" in str(err).lower():
+            if "authentication" in str(err).lower() or "unauthorized" in str(err).lower() or "invalid" in str(err).lower():
                 raise InvalidAuth from err
             raise CannotConnect from err
 
         return {
             "email": viewer_info.get("email", user_input[CONF_EMAIL]),
             "name": viewer_info.get("preferredName") or viewer_info.get("givenName", ""),
-            "accounts_count": len(viewer_info.get("accounts", [])),
+            "accounts_count": len(accounts),
         }
 
 

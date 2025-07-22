@@ -1,4 +1,4 @@
-"""Switch platform for Octopus Energy Spain - SIMPLIFIED data structure."""
+"""Switch platform for Octopus Energy Spain - SIMPLIFIED."""
 from __future__ import annotations
 
 import asyncio
@@ -30,7 +30,6 @@ async def async_setup_entry(
     # Add boost charge switches for each charger
     for account_number, devices in coordinator.data.get("devices", {}).items():
         for device in devices:
-            # Only add switches for charge points
             if device.get("__typename") == "SmartFlexChargePoint":
                 entities.append(OctopusBoostChargeSwitch(coordinator, account_number, device["id"]))
 
@@ -38,7 +37,7 @@ async def async_setup_entry(
 
 
 def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str, Any]:
-    """Safely create device info, handling null device data."""
+    """Safely create device info."""
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
@@ -57,7 +56,7 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
 
 
 class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
-    """Switch for controlling boost charging - SIMPLIFIED structure."""
+    """Switch for controlling boost charging."""
 
     def __init__(
         self,
@@ -77,7 +76,7 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         self._attr_icon = "mdi:ev-station"
 
     def _get_device_data(self) -> dict[str, Any] | None:
-        """Get device data from coordinator - SIMPLIFIED."""
+        """Get device data from coordinator."""
         try:
             devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
@@ -88,11 +87,10 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         return None
 
     def _get_current_state(self) -> str | None:
-        """Get current device state - SIMPLIFIED."""
+        """Get current device state."""
         try:
             device = self._get_device_data()
             if device:
-                # Status is now directly in the device data
                 return device.get("status", {}).get("currentState")
         except (KeyError, TypeError, AttributeError):
             pass
@@ -108,7 +106,6 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
     def is_on(self) -> bool | None:
         """Return if boost charging is on."""
         current_state = self._get_current_state()
-        # Boost is ON when state is "BOOSTING"
         return current_state == "BOOSTING"
 
     @property
@@ -116,59 +113,72 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
         """Return if the switch is available."""
         current_state = self._get_current_state()
         
-        # Switch is available when car is connected (any state except NOT_AVAILABLE)
+        # Switch is available when car is connected
         connected_states = [
             "SMART_CONTROL_CAPABLE",     # Connected, ready
             "SMART_CONTROL_IN_PROGRESS", # Charging in scheduled session 
             "BOOSTING"                   # Already boosting
         ]
         
-        return current_state in connected_states
+        is_available = current_state in connected_states
+        
+        if not is_available:
+            _LOGGER.debug("Boost switch unavailable for device %s: state is %s", self._device_id, current_state)
+        
+        return is_available
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Start boost charging."""
         current_state = self._get_current_state()
+        device = self._get_device_data()
+        device_name = device.get("name", "Unknown") if device else "Unknown"
+        
+        _LOGGER.info("Starting boost charge for %s (current state: %s)", device_name, current_state)
         
         # Check if we can start boost charging
         if current_state == "BOOSTING":
-            _LOGGER.warning("Boost charging already active for device %s", self._device_id)
+            _LOGGER.warning("Boost charging already active for %s", device_name)
             return
             
         if current_state == "SMART_CONTROL_NOT_AVAILABLE":
-            _LOGGER.error("Cannot start boost charging - car not connected to device %s", self._device_id)
+            _LOGGER.error("Cannot start boost charging - car not connected to %s", device_name)
             raise Exception("Coche no conectado - no se puede iniciar carga rápida")
         
         try:
             await self.coordinator.api.start_boost_charge(self._device_id)
-            _LOGGER.info("Started boost charging for device %s", self._device_id)
+            _LOGGER.info("Started boost charging for %s", device_name)
             
             # Wait for change to propagate, then refresh
             await asyncio.sleep(3)
             await self.coordinator.async_refresh_specific_device(self._device_id)
             
         except Exception as err:
-            _LOGGER.error("Failed to start boost charging for device %s: %s", self._device_id, err)
+            _LOGGER.error("Failed to start boost charging for %s: %s", device_name, err)
             raise
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Stop boost charging."""
         current_state = self._get_current_state()
+        device = self._get_device_data()
+        device_name = device.get("name", "Unknown") if device else "Unknown"
+        
+        _LOGGER.info("Stopping boost charge for %s (current state: %s)", device_name, current_state)
         
         # Check if boost is actually running
         if current_state != "BOOSTING":
-            _LOGGER.warning("Boost charging not active for device %s (state: %s)", self._device_id, current_state)
+            _LOGGER.warning("Boost charging not active for %s (state: %s)", device_name, current_state)
             return
         
         try:
             await self.coordinator.api.stop_boost_charge(self._device_id)
-            _LOGGER.info("Stopped boost charging for device %s", self._device_id)
+            _LOGGER.info("Stopped boost charging for %s", device_name)
             
             # Wait for change to propagate, then refresh
             await asyncio.sleep(3)
             await self.coordinator.async_refresh_specific_device(self._device_id)
             
         except Exception as err:
-            _LOGGER.error("Failed to stop boost charging for device %s: %s", self._device_id, err)
+            _LOGGER.error("Failed to stop boost charging for %s: %s", device_name, err)
             raise
 
     @property
@@ -229,17 +239,11 @@ class OctopusBoostChargeSwitch(CoordinatorEntity, SwitchEntity):
             attrs["can_stop_boost"] = False
             attrs["reason"] = "Estado desconocido"
 
-        # Add planned dispatches info - safe version
+        # Add planned dispatches info
         try:
-            dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
-            if dispatches and attrs["is_connected"]:
-                attrs["planned_sessions"] = len(dispatches)
-                if dispatches:
-                    next_dispatch = dispatches[0]
-                    attrs["next_session_start"] = next_dispatch.get("start")
-                    attrs["next_session_end"] = next_dispatch.get("end")
-            elif attrs["is_connected"]:
-                attrs["planned_sessions"] = 0
+            dispatches_count = self.coordinator.get_planned_dispatches_count(self._device_id)
+            attrs["planned_sessions"] = dispatches_count
+            if attrs["is_connected"] and dispatches_count == 0:
                 attrs["reason"] += " (sin sesiones programadas)"
         except (KeyError, TypeError, AttributeError):
             attrs["planned_sessions"] = 0

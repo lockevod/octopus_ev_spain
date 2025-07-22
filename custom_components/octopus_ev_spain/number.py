@@ -1,4 +1,4 @@
-"""Number platform for Octopus Energy Spain - SIMPLIFIED for max percentage only."""
+"""Number platform for Octopus Energy Spain - SIMPLIFIED."""
 from __future__ import annotations
 
 import asyncio
@@ -41,7 +41,7 @@ async def async_setup_entry(
 
 
 def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str, Any]:
-    """Safely create device info, handling null device data."""
+    """Safely create device info."""
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
@@ -99,10 +99,9 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
         """Get device preferences."""
         try:
             preferences_data = self.coordinator.data.get("device_preferences", {}).get(self._device_id, {})
-            # Check if preferences_data has the expected structure
+            # Check structure
             if isinstance(preferences_data, dict) and "preferences" in preferences_data:
                 return preferences_data["preferences"]
-            # Sometimes the API returns preferences directly in the device
             elif isinstance(preferences_data, dict) and "schedules" in preferences_data:
                 return preferences_data
         except (KeyError, TypeError, AttributeError):
@@ -123,13 +122,22 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
     @property
     def available(self) -> bool:
         """Return if entity is available."""
-        # Max percentage should always be available
-        return self._get_preferences() is not None
+        # Max percentage should always be available if preferences exist
+        preferences = self._get_preferences()
+        if preferences is None:
+            _LOGGER.debug("Max percentage unavailable for %s: no preferences", self._device_id)
+            return False
+        return True
 
     async def async_set_native_value(self, value: float) -> None:
         """Set the max percentage."""
         try:
-            # Get current preferences
+            device = self._get_device_data()
+            device_name = device.get("name", "Cargador") if device else "Cargador"
+            
+            _LOGGER.info("Setting max percentage for %s to %s%%", device_name, value)
+            
+            # Get current preferences to preserve target time
             preferences = self._get_preferences()
             current_time = "10:30"  # Default
             
@@ -158,11 +166,22 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
                 schedules=schedules
             )
             
-            _LOGGER.info("Updated max percentage for device %s to %s%%", self._device_id, value)
+            _LOGGER.info("Successfully updated max percentage for %s to %s%%", device_name, value)
             
             # Refresh data
             await asyncio.sleep(2)
             await self.coordinator.async_refresh_specific_device(self._device_id)
+            
+            # Send notification
+            await self.hass.services.async_call(
+                "notify",
+                "persistent_notification",
+                {
+                    "title": f"🔋 {device_name}",
+                    "message": f"Porcentaje máximo actualizado a {value}%",
+                    "notification_id": f"charger_max_percentage_{self._device_id}",
+                },
+            )
             
         except Exception as err:
             _LOGGER.error("Failed to set max percentage for device %s: %s", self._device_id, err)
@@ -193,5 +212,7 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
                     
                 attrs["mode"] = preferences.get("mode", "CHARGE")
                 attrs["unit"] = preferences.get("unit", "PERCENTAGE")
+        else:
+            attrs["unavailable_reason"] = "Preferencias no disponibles"
         
         return attrs
