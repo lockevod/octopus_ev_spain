@@ -9,7 +9,7 @@ CONF_PASSWORD: Final = "password"
 
 # Default values - SIMPLIFIED
 DEFAULT_SCAN_INTERVAL: Final = 120  # 2 minutes like original repo
-DEFAULT_NAME: Final = "Octopus Energy Spain"
+DEFAULT_NAME: Final = "Octopus Energy EV Spain"
 DEFAULT_MAX_PERCENTAGE: Final = 95
 DEFAULT_TARGET_TIME: Final = "10:30"
 

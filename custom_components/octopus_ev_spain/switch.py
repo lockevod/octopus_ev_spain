@@ -42,14 +42,14 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
         return {
             "identifiers": {(DOMAIN, device_id)},
             "name": "Dispositivo Desconocido",
-            "manufacturer": "Octopus Energy",
+            "manufacturer": "Lockevod",
             "model": "Desconocido",
         }
         
     return {
         "identifiers": {(DOMAIN, device_id)},
         "name": device.get("name", "Dispositivo Desconocido"),
-        "manufacturer": "Octopus Energy",
+        "manufacturer": "Lockevod",
         "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
         "sw_version": device.get("deviceType", "Desconocido"),
     }
