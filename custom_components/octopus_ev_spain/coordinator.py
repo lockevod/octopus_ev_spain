@@ -51,6 +51,9 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                 "viewer": viewer_info,
                 "accounts": {},
                 "billing_info": {},  # NEW: For invoice data
+                "account_properties": {},  # NEW: For contract and address data
+                "property_meters": {},     # NEW: For CUPS data
+                "electricity_agreements": {},  # NEW: For contract details
                 "devices": {},
                 "planned_dispatches": {},
                 "charge_history": {},
@@ -74,6 +77,41 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                     except Exception as err:
                         _LOGGER.warning("Failed to get billing info for account %s: %s", account_number, err)
                         data["billing_info"][account_number] = {"last_invoice": None}
+                    
+                    # Get account properties (contract number, address)
+                    try:
+                        properties_data = await self.api.get_account_properties(account_number)
+                        data["account_properties"][account_number] = properties_data
+                        _LOGGER.debug("Got properties for account %s", account_number)
+                        
+                        # Get property meters (CUPS) if we have properties
+                        if properties_data.get("properties"):
+                            property_id = properties_data["properties"][0]["id"]
+                            try:
+                                meters_data = await self.api.get_property_meters(property_id)
+                                data["property_meters"][account_number] = meters_data
+                                _LOGGER.debug("Got meters for property %s", property_id)
+                                
+                                # Get electricity agreement details if we have electricity meter
+                                electricity_points = meters_data.get("electricitySupplyPoints", [])
+                                if electricity_points:
+                                    meter_id = electricity_points[0]["id"]
+                                    try:
+                                        agreement_data = await self.api.get_electricity_agreement(meter_id)
+                                        data["electricity_agreements"][account_number] = agreement_data
+                                        _LOGGER.debug("Got electricity agreement for meter %s", meter_id)
+                                    except Exception as err:
+                                        _LOGGER.warning("Failed to get electricity agreement for meter %s: %s", meter_id, err)
+                                        data["electricity_agreements"][account_number] = {}
+                            except Exception as err:
+                                _LOGGER.warning("Failed to get meters for property %s: %s", property_id, err)
+                                data["property_meters"][account_number] = {}
+                                data["electricity_agreements"][account_number] = {}
+                    except Exception as err:
+                        _LOGGER.warning("Failed to get properties for account %s: %s", account_number, err)
+                        data["account_properties"][account_number] = {}
+                        data["property_meters"][account_number] = {}
+                        data["electricity_agreements"][account_number] = {}
                     
                     # Get devices with states
                     devices = await self.api.get_devices_with_states(account_number)
@@ -103,43 +141,40 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                             except Exception as err:
                                 _LOGGER.warning("Failed to get preferences for %s: %s", device_name, err)
                             
-                            # Get planned dispatches ONLY if car is connected
-                            connected_states = [
-                                "SMART_CONTROL_CAPABLE",
-                                "BOOSTING", 
-                                "SMART_CONTROL_IN_PROGRESS"
-                            ]
+                            # Get planned dispatches - ALWAYS try to get them, don't depend on state
+                            try:
+                                dispatches = await self.api.get_planned_dispatches(device_id)
+                                data["planned_dispatches"][device_id] = dispatches
+                                _LOGGER.debug("Got %d planned dispatches for %s", len(dispatches), device_name)
+                            except Exception as err:
+                                _LOGGER.warning("Failed to get planned dispatches for %s: %s", device_name, err)
+                                data["planned_dispatches"][device_id] = []
                             
-                            if current_state in connected_states:
-                                _LOGGER.debug("Car connected to %s, fetching planned dispatches", device_name)
-                                try:
-                                    dispatches = await self.api.get_planned_dispatches(device_id)
-                                    data["planned_dispatches"][device_id] = dispatches
-                                    _LOGGER.info("Got %d planned dispatches for %s", len(dispatches), device_name)
-                                except Exception as err:
-                                    _LOGGER.warning("Failed to get planned dispatches for %s: %s", device_name, err)
-                            else:
-                                _LOGGER.debug("Car not connected to %s (state: %s), skipping planned dispatches", 
-                                            device_name, current_state)
-                            
-                            # Get charge history (optional)
+                            # Get charge history - ALWAYS try to get it (should always be available)
                             try:
                                 history = await self.api.get_charge_history(account_number, device_id, 3)
                                 data["charge_history"][device_id] = history
                                 if history and len(history) > 0:
                                     sessions = history[0].get("chargePointChargingSession", {}).get("edges", [])
                                     _LOGGER.debug("Got %d charge sessions for %s", len(sessions), device_name)
+                                else:
+                                    _LOGGER.debug("No charge history returned for %s", device_name)
                             except Exception as err:
                                 if "KT-CT-7899" in str(err):
-                                    _LOGGER.debug("No charge history for %s (normal for new devices)", device_name)
+                                    _LOGGER.debug("No charge history for %s (device may be new or no sessions yet)", device_name)
+                                    data["charge_history"][device_id] = []
                                 else:
                                     _LOGGER.warning("Failed to get charge history for %s: %s", device_name, err)
+                                    data["charge_history"][device_id] = []
 
                 except Exception as err:
                     _LOGGER.error("Failed to fetch data for account %s: %s", account_number, err)
                     # Set default empty data for failed account
                     data["accounts"][account_number] = {"ledgers": []}
                     data["devices"][account_number] = []
+                    data["account_properties"][account_number] = {}
+                    data["property_meters"][account_number] = {}
+                    data["electricity_agreements"][account_number] = {}
 
             _LOGGER.info("Data update completed for %d accounts", len(self.accounts))
             return data
@@ -184,18 +219,14 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                         device_name = device.get("name", "Unknown")
                         current_state = device.get("status", {}).get("currentState")
                         
-                        # Update planned dispatches if connected
-                        connected_states = ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"]
-                        if current_state in connected_states:
-                            try:
-                                dispatches = await self.api.get_planned_dispatches(device_id)
-                                self.data["planned_dispatches"][device_id] = dispatches
-                                _LOGGER.info("Refreshed %d planned dispatches for %s", len(dispatches), device_name)
-                            except Exception as err:
-                                _LOGGER.warning("Failed to refresh planned dispatches for %s: %s", device_name, err)
-                        else:
+                        # ALWAYS update planned dispatches, don't depend on connection state
+                        try:
+                            dispatches = await self.api.get_planned_dispatches(device_id)
+                            self.data["planned_dispatches"][device_id] = dispatches
+                            _LOGGER.info("Refreshed %d planned dispatches for %s", len(dispatches), device_name)
+                        except Exception as err:
+                            _LOGGER.warning("Failed to refresh planned dispatches for %s: %s", device_name, err)
                             self.data["planned_dispatches"][device_id] = []
-                            _LOGGER.debug("Car disconnected from %s, cleared planned dispatches", device_name)
                         
                         break
                 

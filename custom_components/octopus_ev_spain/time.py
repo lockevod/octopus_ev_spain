@@ -173,10 +173,10 @@ class OctopusChargerTargetTimeEntity(CoordinatorEntity, TimeEntity):
             await asyncio.sleep(2)
             await self.coordinator.async_refresh_specific_device(self._device_id)
             
-            # Send notification
+            # FIXED: Send notification using persistent_notification.create
             await self.hass.services.async_call(
-                "notify",
                 "persistent_notification",
+                "create",
                 {
                     "title": f"⏰ {device_name}",
                     "message": f"Hora objetivo actualizada a {new_time}",

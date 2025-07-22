@@ -176,10 +176,10 @@ class OctopusRefreshChargerButton(OctopusDeviceButton):
                 except (KeyError, TypeError, AttributeError):
                     message += " | Sin información de sesiones"
             
-            # Send persistent notification
+            # FIXED: Use persistent_notification.create instead of notify.persistent_notification
             await self.hass.services.async_call(
-                "notify",
                 "persistent_notification",
+                "create",
                 {
                     "title": f"{icon} {device_name}",
                     "message": message,
@@ -212,13 +212,13 @@ class OctopusRefreshChargerButton(OctopusDeviceButton):
         except Exception as err:
             _LOGGER.error("Failed to refresh and check status for device %s: %s", self._device_id, err)
             
-            # Send error notification
+            # FIXED: Send error notification using correct service
             device = self._get_device_data()
             device_name = device.get("name", "Cargador EV") if device else "Cargador EV"
             
             await self.hass.services.async_call(
-                "notify",
                 "persistent_notification",
+                "create",
                 {
                     "title": f"❌ {device_name}",
                     "message": f"Error al actualizar: {str(err)}",

@@ -151,6 +151,71 @@ class OctopusSpainAPI:
         response = await self._execute_query(query, {"account": account_number})
         return response["data"]["accountBillingInfo"]
 
+    async def get_account_properties(self, account_number: str) -> dict[str, Any]:
+        """Get account properties including address and contract number."""
+        query = """
+            query GetAccountProperties($accountNumber: String!) {
+                account(accountNumber: $accountNumber) {
+                    properties {
+                        id
+                        address
+                        splitAddress
+                        postcode
+                        occupancyPeriods {
+                            effectiveTo
+                            effectiveFrom
+                        }
+                    }
+                    number
+                }
+            }
+        """
+        
+        response = await self._execute_query(query, {"accountNumber": account_number})
+        return response["data"]["account"]
+
+    async def get_property_meters(self, property_id: str) -> dict[str, Any]:
+        """Get CUPS for electricity (ignore gas)."""
+        query = """
+            query GetMetersForProperty($propertyId: ID!) {
+                property(id: $propertyId) {
+                    id
+                    electricitySupplyPoints {
+                        id
+                        cups
+                    }
+                    gasSupplyPoints {
+                        id
+                        cups
+                    }
+                }
+            }
+        """
+        
+        response = await self._execute_query(query, {"propertyId": property_id})
+        return response["data"]["property"]
+
+    async def get_electricity_agreement(self, meter_id: str) -> dict[str, Any]:
+        """Get active electricity contract details."""
+        query = """
+            query GetElectricityAgreementsForMeter($meterId: ID!) {
+                electricitySupplyPoint(id: $meterId) {
+                    activeAgreement {
+                        id
+                        validFrom
+                        validTo
+                        product {
+                            displayName
+                        }
+                    }
+                    id
+                }
+            }
+        """
+        
+        response = await self._execute_query(query, {"meterId": meter_id})
+        return response["data"]["electricitySupplyPoint"]
+
     async def get_devices_with_states(self, account_number: str) -> list[dict[str, Any]]:
         """Get devices with their current states."""
         query = """

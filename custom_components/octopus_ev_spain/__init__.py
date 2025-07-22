@@ -242,9 +242,10 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
                 elif new_state == "SMART_CONTROL_CAPABLE":
                     icon = "✅"
                 
+                # FIXED: Use persistent_notification.create instead of notify.persistent_notification
                 await hass.services.async_call(
-                    "notify",
                     "persistent_notification",
+                    "create",
                     {
                         "title": f"{icon} {device_name}",
                         "message": message,
@@ -330,9 +331,10 @@ async def _async_register_services(hass: HomeAssistant, coordinator: OctopusSpai
             device_data = await coordinator.async_get_device_data(device_id)
             device_name = device_data.get("name", "Cargador EV") if device_data else "Cargador EV"
             
+            # FIXED: Use persistent_notification.create
             await hass.services.async_call(
-                "notify",
                 "persistent_notification",
+                "create",
                 {
                     "title": f"⚙️ {device_name}",
                     "message": f"Preferencias actualizadas: {max_percentage}% a las {target_time}",

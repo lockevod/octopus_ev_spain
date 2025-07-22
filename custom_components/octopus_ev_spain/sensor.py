@@ -36,11 +36,30 @@ async def async_setup_entry(
 
     entities: list[SensorEntity] = []
 
-    # Account-level sensors (ledger balances + invoices)
+    # Account-level sensors (ledger balances + invoices + contract info)
     for account_number in coordinator.accounts:
         account_data = coordinator.data.get("accounts", {}).get(account_number, {})
         
-        # Add ledger sensors
+        # Add NEW contract information sensors FIRST (in order requested)
+        properties_data = coordinator.data.get("account_properties", {}).get(account_number, {})
+        if properties_data:
+            entities.append(OctopusContractNumberSensor(coordinator, account_number))
+            if properties_data.get("properties"):
+                entities.append(OctopusAddressSensor(coordinator, account_number))
+        
+        # Add CUPS sensor if available
+        meters_data = coordinator.data.get("property_meters", {}).get(account_number, {})
+        if meters_data.get("electricitySupplyPoints"):
+            entities.append(OctopusCupsSensor(coordinator, account_number))
+        
+        # Add contract details sensors if available
+        agreement_data = coordinator.data.get("electricity_agreements", {}).get(account_number, {})
+        if agreement_data.get("activeAgreement"):
+            entities.append(OctopusContractTypeSensor(coordinator, account_number))
+            entities.append(OctopusContractValidFromSensor(coordinator, account_number))
+            entities.append(OctopusContractValidToSensor(coordinator, account_number))
+        
+        # Add existing ledger sensors
         for ledger in account_data.get("ledgers", []):
             entities.append(OctopusLedgerSensor(coordinator, account_number, ledger))
         
@@ -56,14 +75,17 @@ async def async_setup_entry(
             device_type = device.get("__typename")
             
             if device_type == "SmartFlexChargePoint":
-                # Add charger-specific sensors
+                # Add charger-specific sensors (order: dirección, contrato, estado, planificada, última carga)
                 entities.extend([
+                    # NEW: Reference sensors for contract info in charger device
+                    OctopusChargerContractReferenceSensor(coordinator, account_number, device_id),
+                    OctopusChargerAddressReferenceSensor(coordinator, account_number, device_id),
                     OctopusDeviceStateSensor(coordinator, account_number, device_id),
                     OctopusChargerPlannedDispatchesSensor(coordinator, device_id),
                     OctopusChargerLastEnergyAddedSensor(coordinator, device_id),
                     OctopusChargerLastSessionDurationSensor(coordinator, device_id),
                     OctopusChargerLastSessionCostSensor(coordinator, device_id),
-                    OctopusChargerPreferencesSensor(coordinator, device_id),
+                    # REMOVED: OctopusChargerPreferencesSensor - no aporta valor según usuario
                 ])
 
     async_add_entities(entities)
@@ -87,6 +109,276 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
         "sw_version": device.get("deviceType", "Desconocido"),
     }
 
+
+# NEW SENSORS - Contract and Property Information
+
+class OctopusContractNumberSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for contract number."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Número de Contrato" if is_single_account else f"Octopus Número de Contrato ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_contract_number"
+        self._attr_icon = "mdi:file-document-outline"
+
+    @property
+    def native_value(self) -> str | None:
+        properties_data = self.coordinator.data.get("account_properties", {}).get(self._account_number, {})
+        return properties_data.get("number")
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusAddressSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for property address."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Dirección" if is_single_account else f"Octopus Dirección ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_address"
+        self._attr_icon = "mdi:home"
+
+    @property
+    def native_value(self) -> str | None:
+        properties_data = self.coordinator.data.get("account_properties", {}).get(self._account_number, {})
+        if properties_data.get("properties"):
+            return properties_data["properties"][0].get("address")
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusCupsSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for electricity CUPS."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus CUPS Electricidad" if is_single_account else f"Octopus CUPS Electricidad ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_electricity_cups"
+        self._attr_icon = "mdi:electric-switch"
+
+    @property
+    def native_value(self) -> str | None:
+        meters_data = self.coordinator.data.get("property_meters", {}).get(self._account_number, {})
+        electricity_points = meters_data.get("electricitySupplyPoints", [])
+        if electricity_points:
+            return electricity_points[0].get("cups")
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusContractTypeSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for contract type."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Tipo de Contrato" if is_single_account else f"Octopus Tipo de Contrato ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_contract_type"
+        self._attr_icon = "mdi:file-contract"
+
+    @property
+    def native_value(self) -> str | None:
+        agreement_data = self.coordinator.data.get("electricity_agreements", {}).get(self._account_number, {})
+        active_agreement = agreement_data.get("activeAgreement")
+        if active_agreement:
+            return active_agreement.get("product", {}).get("displayName")
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusContractValidFromSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for contract valid from date."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Contrato Válido Desde" if is_single_account else f"Octopus Contrato Válido Desde ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_contract_valid_from"
+        self._attr_device_class = SensorDeviceClass.DATE
+        self._attr_icon = "mdi:calendar-start"
+
+    @property
+    def native_value(self) -> str | None:
+        agreement_data = self.coordinator.data.get("electricity_agreements", {}).get(self._account_number, {})
+        active_agreement = agreement_data.get("activeAgreement")
+        if active_agreement:
+            valid_from = active_agreement.get("validFrom")
+            if valid_from:
+                try:
+                    return datetime.fromisoformat(valid_from.replace('Z', '+00:00')).date()
+                except ValueError:
+                    pass
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusContractValidToSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for contract valid to date."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Contrato Válido Hasta" if is_single_account else f"Octopus Contrato Válido Hasta ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_contract_valid_to"
+        self._attr_device_class = SensorDeviceClass.DATE
+        self._attr_icon = "mdi:calendar-end"
+
+    @property
+    def native_value(self) -> str | None:
+        agreement_data = self.coordinator.data.get("electricity_agreements", {}).get(self._account_number, {})
+        active_agreement = agreement_data.get("activeAgreement")
+        if active_agreement:
+            valid_to = active_agreement.get("validTo")
+            if valid_to:
+                try:
+                    return datetime.fromisoformat(valid_to.replace('Z', '+00:00')).date()
+                except ValueError:
+                    pass
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+# CHARGER REFERENCE SENSORS - Show contract info also in charger device
+
+class OctopusChargerContractReferenceSensor(CoordinatorEntity, SensorEntity):
+    """Reference sensor for contract number in charger device."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Cargador") if device else "Cargador"
+        self._attr_name = f"{device_name} Número de Contrato"
+        self._attr_unique_id = f"octopus_{device_id}_contract_number_ref"
+        self._attr_icon = "mdi:file-document-outline"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        """Get device data from coordinator."""
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        except (KeyError, TypeError, AttributeError):
+            pass
+        return None
+
+    @property
+    def native_value(self) -> str | None:
+        properties_data = self.coordinator.data.get("account_properties", {}).get(self._account_number, {})
+        return properties_data.get("number")
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information for charger."""
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+
+class OctopusChargerAddressReferenceSensor(CoordinatorEntity, SensorEntity):
+    """Reference sensor for address in charger device."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Cargador") if device else "Cargador"
+        self._attr_name = f"{device_name} Dirección"
+        self._attr_unique_id = f"octopus_{device_id}_address_ref"
+        self._attr_icon = "mdi:home"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        """Get device data from coordinator."""
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        except (KeyError, TypeError, AttributeError):
+            pass
+        return None
+
+    @property
+    def native_value(self) -> str | None:
+        properties_data = self.coordinator.data.get("account_properties", {}).get(self._account_number, {})
+        if properties_data.get("properties"):
+            return properties_data["properties"][0].get("address")
+        return None
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        """Return device information for charger."""
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+
+# EXISTING SENSORS - With some modifications
 
 class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
     """Sensor for account ledger balances."""
@@ -140,7 +432,7 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> dict[str, Any]:
         return {
             "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus Energy EV",
+            "name": "Octopus Energy EV España",
             "manufacturer": "Lockevod",
             "model": "Spain",
         }
@@ -238,7 +530,7 @@ class OctopusDeviceStateSensor(CoordinatorEntity, SensorEntity):
 
 
 class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for planned charging dispatches."""
+    """Sensor for planned charging dispatches - FIXED."""
 
     def __init__(
         self,
@@ -267,164 +559,90 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         return None
 
     @property
-    def native_value(self) -> int:
-        """Return number of planned dispatches."""
+    def native_value(self) -> str:
+        """Return planned dispatches info - FIXED to show meaningful message."""
+        device = self._get_device_data()
+        if not device:
+            return "Dispositivo no encontrado"
+        
+        current_state = device.get("status", {}).get("currentState")
         dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
-        return len(dispatches)
+        
+        # Check if car is connected
+        connected_states = ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"]
+        is_connected = current_state in connected_states
+        
+        if not is_connected:
+            return "Coche no conectado"
+        
+        # Car is connected, show dispatch count
+        dispatch_count = len(dispatches)
+        if dispatch_count == 0:
+            return "Sin sesiones programadas"
+        elif dispatch_count == 1:
+            return "1 sesión programada"
+        else:
+            return f"{dispatch_count} sesiones programadas"
 
     @property
     def available(self) -> bool:
-        """Return if sensor is available - only when car is connected."""
-        device = self._get_device_data()
-        if not device:
-            return False
-        
-        current_state = device.get("status", {}).get("currentState")
-        connected_states = ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"]
-        return current_state in connected_states
+        """Return if sensor is available - ALWAYS available."""
+        return True
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
         """Return extra attributes."""
+        device = self._get_device_data()
         dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
         
         attrs = {
             "device_id": self._device_id,
         }
         
-        if not self.available:
-            attrs["unavailable_reason"] = "Coche desconectado - información no disponible"
-            return attrs
-        
-        if dispatches:
-            # Add formatted dispatch info
-            formatted_dispatches = []
-            for dispatch in dispatches:
-                start_time = dispatch.get("start")
-                end_time = dispatch.get("end")
-                dispatch_type = dispatch.get("type")
+        if device:
+            current_state = device.get("status", {}).get("currentState")
+            connected_states = ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"]
+            is_connected = current_state in connected_states
+            
+            attrs["is_connected"] = is_connected
+            attrs["current_state"] = current_state
+            attrs["dispatch_count"] = len(dispatches)
+            
+            if is_connected and dispatches:
+                # Add formatted dispatch info
+                formatted_dispatches = []
+                for dispatch in dispatches:
+                    start_time = dispatch.get("start")
+                    end_time = dispatch.get("end")
+                    dispatch_type = dispatch.get("type")
+                    
+                    if start_time and end_time:
+                        try:
+                            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                            
+                            formatted_dispatches.append({
+                                "start": start_dt.strftime("%Y-%m-%d %H:%M"),
+                                "end": end_dt.strftime("%Y-%m-%d %H:%M"),
+                                "duration_hours": round((end_dt - start_dt).total_seconds() / 3600, 1),
+                                "type": dispatch_type
+                            })
+                        except ValueError:
+                            formatted_dispatches.append({
+                                "start": start_time,
+                                "end": end_time,
+                                "type": dispatch_type
+                            })
                 
-                if start_time and end_time:
-                    try:
-                        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-                        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-                        
-                        formatted_dispatches.append({
-                            "start": start_dt.strftime("%Y-%m-%d %H:%M"),
-                            "end": end_dt.strftime("%Y-%m-%d %H:%M"),
-                            "duration_hours": round((end_dt - start_dt).total_seconds() / 3600, 1),
-                            "type": dispatch_type
-                        })
-                    except ValueError:
-                        formatted_dispatches.append({
-                            "start": start_time,
-                            "end": end_time,
-                            "type": dispatch_type
-                        })
-            
-            attrs["dispatches"] = formatted_dispatches
-            
-            # Add next dispatch info
-            if formatted_dispatches:
-                next_dispatch = formatted_dispatches[0]
-                attrs["next_dispatch_start"] = next_dispatch["start"]
-                attrs["next_dispatch_end"] = next_dispatch["end"]
-                if "duration_hours" in next_dispatch:
-                    attrs["next_dispatch_duration_hours"] = next_dispatch["duration_hours"]
-
-        return attrs
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        """Return device information."""
-        device = self._get_device_data()
-        return _safe_device_info(self._device_id, device)
-
-
-class OctopusChargerPreferencesSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for charger preferences."""
-
-    def __init__(
-        self,
-        coordinator: OctopusSpainDataUpdateCoordinator,
-        device_id: str,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._device_id = device_id
-        
-        device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Configuración"
-        self._attr_unique_id = f"octopus_{device_id}_preferences"
-        self._attr_icon = "mdi:cog"
-
-    def _get_device_data(self) -> dict[str, Any] | None:
-        """Get device data from coordinator."""
-        try:
-            for devices in self.coordinator.data.get("devices", {}).values():
-                for device in devices:
-                    if device.get("id") == self._device_id:
-                        return device
-        except (KeyError, TypeError, AttributeError):
-            pass
-        return None
-
-    def _get_preferences(self) -> dict[str, Any] | None:
-        """Get device preferences."""
-        try:
-            preferences_data = self.coordinator.data.get("device_preferences", {}).get(self._device_id, {})
-            if isinstance(preferences_data, dict) and "preferences" in preferences_data:
-                return preferences_data["preferences"]
-            elif isinstance(preferences_data, dict) and "schedules" in preferences_data:
-                return preferences_data
-        except (KeyError, TypeError, AttributeError):
-            pass
-        return None
-
-    @property
-    def native_value(self) -> str | None:
-        """Return charging mode."""
-        preferences = self._get_preferences()
-        if preferences:
-            return preferences.get("mode", "Desconocido")
-        return "No configurado"
-
-    @property
-    def available(self) -> bool:
-        """Return if sensor is available."""
-        preferences = self._get_preferences()
-        return preferences is not None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return extra attributes."""
-        preferences = self._get_preferences()
-        attrs = {"device_id": self._device_id}
-        
-        if not preferences:
-            attrs["unavailable_reason"] = "Preferencias no disponibles"
-            return attrs
-        
-        attrs.update({
-            "target_type": preferences.get("targetType"),
-            "unit": preferences.get("unit"),
-            "mode": preferences.get("mode"),
-        })
-        
-        schedules = preferences.get("schedules", [])
-        if schedules:
-            attrs["schedules_count"] = len(schedules)
-            
-            # Get max charge level (should be same for all days)
-            max_charges = [s.get("max") for s in schedules if s.get("max")]
-            if max_charges:
-                attrs["max_charge_percentage"] = max_charges[0]
-            
-            # Get target time (should be same for all days)
-            times = [s.get("time") for s in schedules if s.get("time")]
-            if times:
-                attrs["target_time"] = times[0]
+                attrs["dispatches"] = formatted_dispatches
+                
+                # Add next dispatch info
+                if formatted_dispatches:
+                    next_dispatch = formatted_dispatches[0]
+                    attrs["next_dispatch_start"] = next_dispatch["start"]
+                    attrs["next_dispatch_end"] = next_dispatch["end"]
+                    if "duration_hours" in next_dispatch:
+                        attrs["next_dispatch_duration_hours"] = next_dispatch["duration_hours"]
 
         return attrs
 
@@ -436,7 +654,7 @@ class OctopusChargerPreferencesSensor(CoordinatorEntity, SensorEntity):
 
 
 class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for last charging session energy added."""
+    """Sensor for last charging session energy added - FIXED availability."""
 
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
@@ -459,9 +677,12 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
+        """Get last session data - FIXED to match API structure."""
         history_data = self.coordinator.data.get("charge_history", {}).get(self._device_id, [])
         if history_data and len(history_data) > 0:
-            sessions = history_data[0].get("chargePointChargingSession", {}).get("edges", [])
+            # history_data[0] is the device, get its charging sessions
+            device_data = history_data[0]
+            sessions = device_data.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
                 return sessions[0]["node"]
         return None
@@ -478,7 +699,8 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        return self._get_last_session() is not None
+        """ALWAYS available - show 0 if no data."""
+        return True
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -548,14 +770,14 @@ class OctopusInvoiceSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> dict[str, Any]:
         return {
             "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus Energy EVEspaña",
+            "name": "Octopus Energy EV España",
             "manufacturer": "Lockevod",
             "model": "Spain",
         }
 
 
 class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for last charging session duration."""
+    """Sensor for last charging session duration - FIXED availability."""
 
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
@@ -577,9 +799,12 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
+        """Get last session data - FIXED to match API structure."""
         history_data = self.coordinator.data.get("charge_history", {}).get(self._device_id, [])
         if history_data and len(history_data) > 0:
-            sessions = history_data[0].get("chargePointChargingSession", {}).get("edges", [])
+            # history_data[0] is the device, get its charging sessions
+            device_data = history_data[0]
+            sessions = device_data.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
                 return sessions[0]["node"]
         return None
@@ -603,10 +828,8 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def available(self) -> bool:
-        last_session = self._get_last_session()
-        if not last_session:
-            return False
-        return last_session.get("start") and last_session.get("end")
+        """ALWAYS available - show None if no data."""
+        return True
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -615,7 +838,7 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
 
 
 class OctopusChargerLastSessionCostSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for last session cost."""
+    """Sensor for last session cost - FIXED availability and cost handling."""
 
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
@@ -637,29 +860,31 @@ class OctopusChargerLastSessionCostSensor(CoordinatorEntity, SensorEntity):
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
+        """Get last session data - FIXED to match API structure.""" 
         history_data = self.coordinator.data.get("charge_history", {}).get(self._device_id, [])
         if history_data and len(history_data) > 0:
-            sessions = history_data[0].get("chargePointChargingSession", {}).get("edges", [])
+            # history_data[0] is the device, get its charging sessions
+            device_data = history_data[0]
+            sessions = device_data.get("chargePointChargingSession", {}).get("edges", [])
             if sessions:
                 return sessions[0]["node"]
         return None
 
     @property
-    def native_value(self) -> float | None:
+    def native_value(self) -> float:
+        """Return cost - 0 if cost is null as user requested."""
         last_session = self._get_last_session()
         if last_session:
             cost_data = last_session.get("cost")
             if cost_data and cost_data.get("amount"):
                 return float(cost_data["amount"])
-        return None
+        # Return 0 if cost is null (as user requested)
+        return 0
 
     @property
     def available(self) -> bool:
-        last_session = self._get_last_session()
-        if not last_session:
-            return False
-        cost_data = last_session.get("cost")
-        return cost_data is not None and cost_data.get("amount") is not None
+        """ALWAYS available - show 0 if no data."""
+        return True
 
     @property
     def device_info(self) -> dict[str, Any]:
