@@ -1,6 +1,8 @@
 
 # Octopus Energy Spain - Home Assistant Integration
 
+NOT USABLE AT THIS MOMENT 
+
 Integración para conectar tu cuenta de Octopus Energy España con Home Assistant y monitorizar tu consumo, saldo y estado de cargador EV.
 
 ## Requisitos
