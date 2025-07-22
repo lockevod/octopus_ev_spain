@@ -59,8 +59,8 @@ CONNECTED_STATES = [
 DEVICE_TYPE_CHARGE_POINT = "SmartFlexChargePoint"
 DEVICE_TYPE_VEHICLE = "SmartFlexVehicle"
 
-# Platforms
-PLATFORMS: Final = ["sensor", "switch", "button", "number", "time"]
+# Platforms - REMOVED button (no physical refresh button needed)
+PLATFORMS: Final = ["sensor", "switch", "number", "select"]
 
 # Services
 SERVICE_START_BOOST = "start_boost_charge"

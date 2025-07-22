@@ -20,7 +20,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, ELECTRICITY_LEDGER, SOLAR_WALLET_LEDGER, GAS_LEDGER, LEDGER_NAMES
+from .const import DOMAIN, ELECTRICITY_LEDGER, SOLAR_WALLET_LEDGER, LEDGER_NAMES
 from .coordinator import OctopusSpainDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
@@ -59,9 +59,14 @@ async def async_setup_entry(
             entities.append(OctopusContractValidFromSensor(coordinator, account_number))
             entities.append(OctopusContractValidToSensor(coordinator, account_number))
         
-        # Add existing ledger sensors
+        # Add existing ledger sensors - FILTER OUT GAS LEDGERS
         for ledger in account_data.get("ledgers", []):
-            entities.append(OctopusLedgerSensor(coordinator, account_number, ledger))
+            ledger_type = ledger.get("ledgerType")
+            # Only create sensors for electricity and solar wallet, NOT gas
+            if ledger_type in [ELECTRICITY_LEDGER, SOLAR_WALLET_LEDGER]:
+                entities.append(OctopusLedgerSensor(coordinator, account_number, ledger))
+            else:
+                _LOGGER.debug("Skipping ledger type: %s (not electricity/solar)", ledger_type)
         
         # Add invoice sensor (from original repo)
         billing_data = coordinator.data.get("billing_info", {}).get(account_number, {})
@@ -82,6 +87,10 @@ async def async_setup_entry(
                     OctopusChargerAddressReferenceSensor(coordinator, account_number, device_id),
                     OctopusDeviceStateSensor(coordinator, account_number, device_id),
                     OctopusChargerPlannedDispatchesSensor(coordinator, device_id),
+                    # NEW: Automation-friendly sensors for planned dispatches
+                    OctopusChargerNextSessionStartSensor(coordinator, device_id),
+                    OctopusChargerNextSessionEndSensor(coordinator, device_id),
+                    OctopusChargerTotalHoursTodaySensor(coordinator, device_id),
                     # NEW: Date of last charge session
                     OctopusChargerLastSessionDateSensor(coordinator, device_id),
                     OctopusChargerLastSessionDurationSensor(coordinator, device_id),
@@ -98,17 +107,17 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
-            "name": "Dispositivo Desconocido",
+            "name": "Unknown Device",  # This will be translated by HA
             "manufacturer": "Lockevod",
-            "model": "Desconocido",
+            "model": "Unknown",
         }
         
     return {
         "identifiers": {(DOMAIN, device_id)},
-        "name": device.get("name", "Dispositivo Desconocido"),
+        "name": device.get("name", "Unknown Device"),
         "manufacturer": "Lockevod",
-        "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
-        "sw_version": device.get("deviceType", "Desconocido"),
+        "model": f"{device.get('__typename', 'Unknown')} ({device.get('provider', 'Unknown')})",
+        "sw_version": device.get("deviceType", "Unknown"),
     }
 
 
@@ -313,9 +322,10 @@ class OctopusChargerContractReferenceSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Número de Contrato"
-        self._attr_unique_id = f"octopus_{device_id}_contract_number_ref"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Contract Number"
+        self._attr_unique_id = f"octopus_{device_id}_01_contract_number_ref"
+        self._attr_translation_key = "contract_number"  # Use translation key
         self._attr_icon = "mdi:file-document-outline"
 
     def _get_device_data(self) -> dict[str, Any] | None:
@@ -350,9 +360,10 @@ class OctopusChargerAddressReferenceSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Dirección"
-        self._attr_unique_id = f"octopus_{device_id}_address_ref"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Address"
+        self._attr_unique_id = f"octopus_{device_id}_02_address_ref"
+        self._attr_translation_key = "address"  # Use translation key
         self._attr_icon = "mdi:home"
 
     def _get_device_data(self) -> dict[str, Any] | None:
@@ -455,9 +466,10 @@ class OctopusDeviceStateSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Dispositivo Desconocido") if device else "Dispositivo Desconocido"
-        self._attr_name = f"{device_name} Estado"
-        self._attr_unique_id = f"octopus_{device_id}_current_state"
+        device_name = device.get("name", "Device") if device else "Device"
+        self._attr_name = f"{device_name} State"
+        self._attr_unique_id = f"octopus_{device_id}_03_current_state"
+        self._attr_translation_key = "device_state"  # Use translation key
         self._attr_icon = "mdi:state-machine"
 
     def _get_device_data(self) -> dict[str, Any] | None:
@@ -478,16 +490,17 @@ class OctopusDeviceStateSensor(CoordinatorEntity, SensorEntity):
         if device:
             current_state = device.get("status", {}).get("currentState")
             
-            # Translate states to Spanish
+            # Use English states - will be translated by HA
             state_translations = {
-                "SMART_CONTROL_NOT_AVAILABLE": "Desconectado",
-                "SMART_CONTROL_CAPABLE": "Conectado",
-                "BOOSTING": "Carga Rápida",
-                "SMART_CONTROL_IN_PROGRESS": "Carga Programada"
+                "SMART_CONTROL_NOT_AVAILABLE": "disconnected",
+                "SMART_CONTROL_CAPABLE": "connected",
+                "BOOSTING": "boost_charging",
+                "SMART_CONTROL_IN_PROGRESS": "scheduled_charging"
             }
             
-            return state_translations.get(current_state, current_state)
-        return "Desconocido"
+            translated_state = state_translations.get(current_state, current_state)
+            return translated_state if translated_state else "unknown"
+        return "unknown"
 
     @property
     def available(self) -> bool:
@@ -544,9 +557,10 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Sesiones Programadas"
-        self._attr_unique_id = f"octopus_{device_id}_planned_dispatches"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Planned Sessions"
+        self._attr_unique_id = f"octopus_{device_id}_04_planned_dispatches"
+        self._attr_translation_key = "planned_dispatches"  # Use translation key
         self._attr_icon = "mdi:calendar-clock"
 
     def _get_device_data(self) -> dict[str, Any] | None:
@@ -562,10 +576,10 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
 
     @property
     def native_value(self) -> str:
-        """Return planned dispatches info - FIXED to show meaningful message."""
+        """Return planned dispatches info with schedules - ENHANCED to show times."""
         device = self._get_device_data()
         if not device:
-            return "Dispositivo no encontrado"
+            return "Device not found"
         
         current_state = device.get("status", {}).get("currentState")
         dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
@@ -575,16 +589,51 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         is_connected = current_state in connected_states
         
         if not is_connected:
-            return "Coche no conectado"
+            return "Car not connected"
         
-        # Car is connected, show dispatch count
+        # Car is connected, show dispatch count and times
         dispatch_count = len(dispatches)
         if dispatch_count == 0:
-            return "Sin sesiones programadas"
-        elif dispatch_count == 1:
-            return "1 sesión programada"
-        else:
-            return f"{dispatch_count} sesiones programadas"
+            return "No scheduled sessions"
+        
+        # Format dispatches with times
+        try:
+            time_ranges = []
+            for dispatch in dispatches:
+                start_time = dispatch.get("start")
+                end_time = dispatch.get("end")
+                
+                if start_time and end_time:
+                    try:
+                        start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                        end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                        
+                        # Format as HH:MM-HH:MM
+                        time_range = f"{start_dt.strftime('%H:%M')}-{end_dt.strftime('%H:%M')}"
+                        time_ranges.append(time_range)
+                    except ValueError:
+                        continue
+            
+            if time_ranges:
+                if dispatch_count == 1:
+                    return f"1 session: {time_ranges[0]}"
+                else:
+                    times_str = ", ".join(time_ranges)
+                    return f"{dispatch_count} sessions: {times_str}"
+            else:
+                # Fallback if time parsing fails
+                if dispatch_count == 1:
+                    return "1 scheduled session"
+                else:
+                    return f"{dispatch_count} scheduled sessions"
+                    
+        except Exception as err:
+            _LOGGER.warning("Failed to format dispatch times: %s", err)
+            # Fallback to simple count
+            if dispatch_count == 1:
+                return "1 scheduled session"
+            else:
+                return f"{dispatch_count} scheduled sessions"
 
     @property
     def available(self) -> bool:
@@ -655,6 +704,221 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         return _safe_device_info(self._device_id, device)
 
 
+class OctopusChargerNextSessionStartSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for next session start time - FOR AUTOMATIONS."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Next Session Start"
+        self._attr_unique_id = f"octopus_{device_id}_05_next_session_start"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:play-circle"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        for devices in self.coordinator.data.get("devices", {}).values():
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        return None
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return next session start datetime."""
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+        
+        if not dispatches:
+            return None
+            
+        # Get the first (next) session
+        first_dispatch = dispatches[0]
+        start_time = first_dispatch.get("start")
+        
+        if start_time:
+            try:
+                return datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+        return None
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+        return {
+            "device_id": self._device_id,
+            "total_sessions": len(dispatches),
+            "has_sessions": len(dispatches) > 0
+        }
+
+
+class OctopusChargerNextSessionEndSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for last session end time today - FOR AUTOMATIONS."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Last Session End"
+        self._attr_unique_id = f"octopus_{device_id}_06_last_session_end"
+        self._attr_device_class = SensorDeviceClass.TIMESTAMP
+        self._attr_icon = "mdi:stop-circle"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        for devices in self.coordinator.data.get("devices", {}).values():
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        return None
+
+    @property
+    def native_value(self) -> datetime | None:
+        """Return last session end datetime today."""
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+        
+        if not dispatches:
+            return None
+            
+        # Get the last session's end time
+        last_dispatch = dispatches[-1]
+        end_time = last_dispatch.get("end")
+        
+        if end_time:
+            try:
+                return datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            except ValueError:
+                pass
+        return None
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+
+class OctopusChargerTotalHoursTodaySensor(CoordinatorEntity, SensorEntity):
+    """Sensor for total charging hours today - FOR AUTOMATIONS."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
+        super().__init__(coordinator)
+        self._device_id = device_id
+        
+        device = self._get_device_data()
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Total Hours Today"
+        self._attr_unique_id = f"octopus_{device_id}_07_total_hours_today"
+        self._attr_native_unit_of_measurement = UnitOfTime.HOURS
+        self._attr_device_class = SensorDeviceClass.DURATION
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_icon = "mdi:clock-time-eight"
+
+    def _get_device_data(self) -> dict[str, Any] | None:
+        for devices in self.coordinator.data.get("devices", {}).values():
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
+        return None
+
+    @property
+    def native_value(self) -> float:
+        """Return total hours of charging planned for today."""
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+        
+        if not dispatches:
+            return 0.0
+            
+        total_hours = 0.0
+        
+        for dispatch in dispatches:
+            start_time = dispatch.get("start")
+            end_time = dispatch.get("end")
+            
+            if start_time and end_time:
+                try:
+                    start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                    duration = (end_dt - start_dt).total_seconds() / 3600
+                    total_hours += duration
+                except ValueError:
+                    continue
+                    
+        return round(total_hours, 2)
+
+    @property
+    def available(self) -> bool:
+        return True
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        device = self._get_device_data()
+        return _safe_device_info(self._device_id, device)
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return detailed session info for automations."""
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(self._device_id, [])
+        
+        attrs = {
+            "device_id": self._device_id,
+            "total_sessions": len(dispatches),
+            "session_details": []
+        }
+        
+        # Add detailed session info
+        for i, dispatch in enumerate(dispatches):
+            start_time = dispatch.get("start")
+            end_time = dispatch.get("end")
+            dispatch_type = dispatch.get("type", "SMART")
+            
+            if start_time and end_time:
+                try:
+                    start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                    duration_hours = round((end_dt - start_dt).total_seconds() / 3600, 2)
+                    
+                    session_detail = {
+                        "session_number": i + 1,
+                        "start_time": start_time,
+                        "end_time": end_time,
+                        "start_time_local": start_dt.strftime("%H:%M"),
+                        "end_time_local": end_dt.strftime("%H:%M"),
+                        "duration_hours": duration_hours,
+                        "type": dispatch_type
+                    }
+                    attrs["session_details"].append(session_detail)
+                    
+                except ValueError:
+                    continue
+        
+        # Add convenience attributes for automations
+        if attrs["session_details"]:
+            first_session = attrs["session_details"][0]
+            last_session = attrs["session_details"][-1]
+            
+            attrs["first_session_start"] = first_session["start_time"]
+            attrs["last_session_end"] = last_session["end_time"]
+            attrs["time_slots"] = [f"{s['start_time_local']}-{s['end_time_local']}" for s in attrs["session_details"]]
+        
+        return attrs
+
+
 class OctopusChargerLastSessionDateSensor(CoordinatorEntity, SensorEntity):
     """Sensor for last charging session date - NEW SENSOR."""
 
@@ -663,9 +927,9 @@ class OctopusChargerLastSessionDateSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Fecha Última Carga"
-        self._attr_unique_id = f"octopus_{device_id}_last_session_date"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Last Charge Date"
+        self._attr_unique_id = f"octopus_{device_id}_08_last_session_date"  # Updated from 05_ to 08_
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:calendar-clock"
 
@@ -740,9 +1004,9 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Última Energía Añadida"
-        self._attr_unique_id = f"octopus_{device_id}_last_energy_added"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Last Energy Added"
+        self._attr_unique_id = f"octopus_{device_id}_10_last_energy_added"  # Updated from 07_
         self._attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
         self._attr_device_class = SensorDeviceClass.ENERGY
         self._attr_state_class = SensorStateClass.TOTAL
@@ -863,9 +1127,9 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Duración Última Sesión"
-        self._attr_unique_id = f"octopus_{device_id}_last_session_duration"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Last Session Duration"
+        self._attr_unique_id = f"octopus_{device_id}_09_last_session_duration"  # Updated from 06_
         self._attr_native_unit_of_measurement = UnitOfTime.HOURS
         self._attr_device_class = SensorDeviceClass.DURATION
         self._attr_icon = "mdi:timer"
@@ -924,9 +1188,9 @@ class OctopusChargerLastSessionCostSensor(CoordinatorEntity, SensorEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Coste Última Sesión"
-        self._attr_unique_id = f"octopus_{device_id}_last_session_cost"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Last Session Cost"
+        self._attr_unique_id = f"octopus_{device_id}_11_last_session_cost"  # Updated from 08_
         self._attr_native_unit_of_measurement = CURRENCY_EURO
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_icon = "mdi:currency-eur"

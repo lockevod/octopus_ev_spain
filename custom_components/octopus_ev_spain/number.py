@@ -74,9 +74,10 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
         self._device_id = device_id
         
         device = self._get_device_data()
-        device_name = device.get("name", "Cargador") if device else "Cargador"
-        self._attr_name = f"{device_name} Porcentaje Máximo"
-        self._attr_unique_id = f"octopus_{device_id}_max_percentage"
+        device_name = device.get("name", "Charger") if device else "Charger"
+        self._attr_name = f"{device_name} Max Percentage"
+        self._attr_unique_id = f"octopus_{device_id}_12_max_percentage"  # Updated from 09_
+        self._attr_translation_key = "max_percentage"  # Use translation key
             
         self._attr_native_unit_of_measurement = PERCENTAGE
         self._attr_native_min_value = 10
@@ -139,17 +140,25 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
             
             # Get current preferences to preserve target time
             preferences = self._get_preferences()
-            current_time = "10:30"  # Default
+            current_time = "10:30"  # Default fallback
             
             if preferences:
                 schedules = preferences.get("schedules", [])
-                if schedules:
-                    current_time = schedules[0].get("time", "10:30")
-                    # Remove seconds if present
-                    if len(current_time) > 5:
-                        current_time = current_time[:5]
+                if schedules and len(schedules) > 0:
+                    # Get the actual current time, don't use default
+                    existing_time = schedules[0].get("time")
+                    if existing_time:
+                        # Clean the time format (remove seconds if present)
+                        current_time = existing_time[:5] if len(existing_time) > 5 else existing_time
+                        _LOGGER.debug("Preserving existing target time: %s", current_time)
+                    else:
+                        _LOGGER.warning("No existing time found in schedule, using default")
+                else:
+                    _LOGGER.warning("No schedules found in preferences, using default time")
+            else:
+                _LOGGER.warning("No preferences found, using default time")
             
-            # Create new schedules with updated max percentage
+            # Create new schedules with updated max percentage but preserved time
             schedules = []
             for day in DAYS_OF_WEEK:
                 schedules.append({
@@ -157,6 +166,8 @@ class OctopusChargerMaxPercentageNumber(CoordinatorEntity, NumberEntity):
                     "time": current_time,
                     "max": float(value)
                 })
+            
+            _LOGGER.debug("Updating preferences with time=%s, max=%s%%", current_time, value)
             
             # Update preferences
             await self.coordinator.api.set_smart_flex_device_preferences(

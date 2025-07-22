@@ -1,47 +1,107 @@
 {
   "config": {
+    "abort": {
+      "already_configured": "This Octopus Energy Spain account is already configured"
+    },
+    "error": {
+      "invalid_auth": "The email or password is incorrect",
+      "cannot_connect": "Unable to connect to Octopus Energy Spain. Please check your internet connection",
+      "unknown": "An unexpected error occurred. Please try again later"
+    },
     "step": {
       "user": {
         "title": "Octopus Energy Spain Setup",
-        "description": "Enter your Octopus Energy Spain credentials to connect your account.",
+        "description": "Enter your Octopus Energy Spain credentials to connect your account",
         "data": {
           "email": "Email Address",
-          "password": "Account Password"
+          "password": "Password"
         },
         "data_description": {
-          "email": "The email address used for your Octopus Energy Spain account",
+          "email": "The email address for your Octopus Energy Spain account",
           "password": "Your account password (stored securely)"
         }
       }
-    },
+    }
+  },
+  "options": {
     "error": {
-      "cannot_connect": "Unable to connect to Octopus Energy Spain. Please check your internet connection and try again.",
-      "invalid_auth": "The email or password is incorrect. Please verify your credentials and try again.",
-      "unknown": "An unexpected error occurred. Please try again later."
+      "invalid_auth": "The email or password is incorrect"
     },
-    "abort": {
-      "already_configured": "This Octopus Energy Spain account is already configured in Home Assistant."
+    "step": {
+      "init": {
+        "title": "Octopus Energy Spain Setup",
+        "data": {
+          "email": "Email Address",
+          "password": "Password"
+        }
+      }
     }
   },
   "entity": {
     "sensor": {
+      "contract_number": {
+        "name": "Contract Number"
+      },
+      "address": {
+        "name": "Address"
+      },
+      "electricity_cups": {
+        "name": "Electricity CUPS"
+      },
+      "contract_type": {
+        "name": "Contract Type"
+      },
+      "contract_valid_from": {
+        "name": "Contract Valid From"
+      },
+      "contract_valid_to": {
+        "name": "Contract Valid To"
+      },
       "electricity_balance": {
         "name": "Electricity Balance"
       },
-      "solar_wallet": {
+      "solar_wallet_balance": {
         "name": "Solar Wallet Balance"
       },
-      "gas_balance": {
-        "name": "Gas Balance"
+      "last_invoice": {
+        "name": "Last Invoice"
       },
-      "device_status": {
-        "name": "Device Status"
+      "device_state": {
+        "name": "Device State",
+        "state": {
+          "disconnected": "Disconnected",
+          "connected": "Connected",
+          "boost_charging": "Boost Charging",
+          "scheduled_charging": "Scheduled Charging",
+          "unknown": "Unknown"
+        }
       },
-      "current_state": {
-        "name": "Current State"
+      "planned_dispatches": {
+        "name": "Planned Sessions",
+        "state": {
+          "device_not_found": "Device not found",
+          "car_not_connected": "Car not connected", 
+          "no_scheduled_sessions": "No scheduled sessions",
+          "session": "session",
+          "sessions": "sessions",
+          "scheduled_session": "scheduled session",
+          "scheduled_sessions": "scheduled sessions"
+        }
       },
-      "charging_sessions": {
-        "name": "Charging Sessions"
+      "next_session_start": {
+        "name": "Next Session Start"
+      },
+      "last_session_end": {
+        "name": "Last Session End"
+      },
+      "total_hours_today": {
+        "name": "Total Hours Today"
+      },
+      "last_session_date": {
+        "name": "Last Charge Date"
+      },
+      "last_session_duration": {
+        "name": "Last Session Duration"
       },
       "last_energy_added": {
         "name": "Last Energy Added"
@@ -55,16 +115,45 @@
         "name": "Boost Charge"
       }
     },
-    "button": {
-      "start_boost": {
-        "name": "Start Boost"
-      },
-      "stop_boost": {
-        "name": "Stop Boost"
-      },
-      "refresh_data": {
-        "name": "Refresh Data"
+    "number": {
+      "max_percentage": {
+        "name": "Max Percentage"
       }
+    },
+    "select": {
+      "target_time": {
+        "name": "Target Time"
+      }
+    }
+  },
+  "services": {
+    "start_boost_charge": {
+      "name": "Start Boost Charge",
+      "description": "Start boost charging for an EV device"
+    },
+    "stop_boost_charge": {
+      "name": "Stop Boost Charge",
+      "description": "Stop boost charging for an EV device"
+    },
+    "refresh_charger": {
+      "name": "Refresh Charger",
+      "description": "Refresh EV charger data"
+    },
+    "check_charger": {
+      "name": "Check Charger Status",
+      "description": "Check charger status and notify of changes"
+    },
+    "car_connected": {
+      "name": "Car Connected",
+      "description": "Handle car connection event"
+    },
+    "car_disconnected": {
+      "name": "Car Disconnected", 
+      "description": "Handle car disconnection event"
+    },
+    "set_preferences": {
+      "name": "Set Preferences",
+      "description": "Configure EV device charging preferences"
     }
   }
 }

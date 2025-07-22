@@ -1,70 +1,159 @@
 {
   "config": {
+    "abort": {
+      "already_configured": "Esta cuenta de Octopus Energy España ya está configurada"
+    },
+    "error": {
+      "invalid_auth": "El correo electrónico o la contraseña son incorrectos",
+      "cannot_connect": "No se puede conectar a Octopus Energy España. Comprueba tu conexión a internet",
+      "unknown": "Ha ocurrido un error inesperado. Inténtalo de nuevo más tarde"
+    },
     "step": {
       "user": {
         "title": "Configuración de Octopus Energy España",
-        "description": "Introduce tus credenciales de Octopus Energy España para conectar tu cuenta.",
+        "description": "Introduce tus credenciales de Octopus Energy España para conectar tu cuenta",
         "data": {
           "email": "Correo electrónico",
-          "password": "Contraseña de la cuenta"
+          "password": "Contraseña"
         },
         "data_description": {
-          "email": "El correo electrónico utilizado para tu cuenta de Octopus Energy España",
+          "email": "El correo electrónico de tu cuenta de Octopus Energy España",
           "password": "Tu contraseña (almacenada de forma segura)"
         }
       }
-    },
+    }
+  },
+  "options": {
     "error": {
-      "cannot_connect": "No se puede conectar a Octopus Energy España. Por favor, comprueba tu conexión a internet e inténtalo de nuevo.",
-      "invalid_auth": "El correo electrónico o la contraseña son incorrectos. Por favor, verifica tus credenciales e inténtalo de nuevo.",
-      "unknown": "Ha ocurrido un error inesperado. Por favor, inténtalo de nuevo más tarde."
+      "invalid_auth": "El correo electrónico o la contraseña son incorrectos"
     },
-    "abort": {
-      "already_configured": "Esta cuenta de Octopus Energy España ya está configurada en Home Assistant."
+    "step": {
+      "init": {
+        "title": "Configuración de Octopus Energy España",
+        "data": {
+          "email": "Correo electrónico",
+          "password": "Contraseña"
+        }
+      }
     }
   },
   "entity": {
     "sensor": {
+      "contract_number": {
+        "name": "Número de Contrato"
+      },
+      "address": {
+        "name": "Dirección"
+      },
+      "electricity_cups": {
+        "name": "CUPS Electricidad"
+      },
+      "contract_type": {
+        "name": "Tipo de Contrato"
+      },
+      "contract_valid_from": {
+        "name": "Contrato Válido Desde"
+      },
+      "contract_valid_to": {
+        "name": "Contrato Válido Hasta"
+      },
       "electricity_balance": {
-        "name": "Saldo de electricidad"
+        "name": "Saldo Electricidad"
       },
-      "solar_wallet": {
-        "name": "Saldo de monedero solar"
+      "solar_wallet_balance": {
+        "name": "Saldo Monedero Solar"
       },
-      "gas_balance": {
-        "name": "Saldo de gas"
+      "last_invoice": {
+        "name": "Última Factura"
       },
-      "device_status": {
-        "name": "Estado del dispositivo"
+      "device_state": {
+        "name": "Estado",
+        "state": {
+          "disconnected": "Desconectado",
+          "connected": "Conectado", 
+          "boost_charging": "Carga Rápida",
+          "scheduled_charging": "Carga Programada",
+          "unknown": "Desconocido"
+        }
       },
-      "current_state": {
-        "name": "Estado actual"
+      "planned_dispatches": {
+        "name": "Sesiones Programadas",
+        "state": {
+          "device_not_found": "Dispositivo no encontrado",
+          "car_not_connected": "Coche no conectado",
+          "no_scheduled_sessions": "Sin sesiones programadas",
+          "session": "sesión",
+          "sessions": "sesiones",
+          "scheduled_session": "sesión programada",
+          "scheduled_sessions": "sesiones programadas"
+        }
       },
-      "charging_sessions": {
-        "name": "Sesiones de carga"
+      "next_session_start": {
+        "name": "Inicio Próxima Sesión"
+      },
+      "last_session_end": {
+        "name": "Fin Última Sesión"
+      },
+      "total_hours_today": {
+        "name": "Total Horas Hoy"
+      },
+      "last_session_date": {
+        "name": "Fecha Última Carga"
+      },
+      "last_session_duration": {
+        "name": "Duración Última Sesión"
       },
       "last_energy_added": {
-        "name": "Última energía añadida"
+        "name": "Última Energía Añadida"
       },
       "last_session_cost": {
-        "name": "Coste de la última sesión"
+        "name": "Coste Última Sesión"
       }
     },
     "switch": {
       "boost_charge": {
-        "name": "Carga rápida"
+        "name": "Carga Rápida"
       }
     },
-    "button": {
-      "start_boost": {
-        "name": "Iniciar carga rápida"
-      },
-      "stop_boost": {
-        "name": "Detener carga rápida"
-      },
-      "refresh_data": {
-        "name": "Actualizar datos"
+    "number": {
+      "max_percentage": {
+        "name": "Porcentaje Máximo"
       }
+    },
+    "select": {
+      "target_time": {
+        "name": "Hora Objetivo"
+      }
+    }
+  },
+  "services": {
+    "start_boost_charge": {
+      "name": "Iniciar Carga Rápida",
+      "description": "Inicia la carga rápida (boost) para un dispositivo EV"
+    },
+    "stop_boost_charge": {
+      "name": "Detener Carga Rápida", 
+      "description": "Detiene la carga rápida (boost) para un dispositivo EV"
+    },
+    "refresh_charger": {
+      "name": "Actualizar Cargador",
+      "description": "Actualiza los datos del cargador EV"
+    },
+    "check_charger": {
+      "name": "Verificar Estado del Cargador",
+      "description": "Verifica el estado del cargador y notifica cambios"
+    },
+    "car_connected": {
+      "name": "Coche Conectado",
+      "description": "Maneja el evento de conexión del coche"
+    },
+    "car_disconnected": {
+      "name": "Coche Desconectado",
+      "description": "Maneja el evento de desconexión del coche"
+    },
+    "set_preferences": {
+      "name": "Configurar Preferencias",
+      "description": "Configura las preferencias de carga del dispositivo EV"
     }
   }
 }
