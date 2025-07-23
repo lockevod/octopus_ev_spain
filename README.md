@@ -7,7 +7,7 @@
 Integración **no oficial** para conectar tu cuenta de **Octopus Energy España** con Home Assistant. Monitoriza tu consumo, saldos, facturas y controla tu cargador EV inteligente.
 
 > ⚠️ **Importante**: Esta es una integración desarrollada por la comunidad, **no oficial** de Octopus Energy. El uso es bajo tu propia responsabilidad.
-
+> ⚠️ **Importante**: BETA 
 ## 🚗 Características Principales
 
 ### 📊 **Información de Cuenta**
@@ -94,6 +94,7 @@ Integración **no oficial** para conectar tu cuenta de **Octopus Energy España*
 ## 🏠 Instalación
 
 ### 📱 **Método 1: My Home Assistant (Recomendado)**
+> ⚠️ **Importante**: No operativo en estos momentos. Disponible en breve
 
 [![Abrir repositorio en HACS](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=lockevod&repository=ha-octopus-ev-spain&category=integration)
 
@@ -105,7 +106,8 @@ Integración **no oficial** para conectar tu cuenta de **Octopus Energy España*
 6. Busca **"Octopus Energy EV Spain"**
 
 ### 🛠️ **Método 2: HACS Manual**
-
+> ⚠️ **Importante**: No operativo en estos momentos. Disponible en breve
+> 
 1. **Instala HACS** si no lo tienes: [Guía oficial HACS](https://hacs.xyz/docs/setup/download)
 2. **Añade repositorio personalizado**:
    - Ve a **HACS → Integraciones → ⋮ → Repositorios personalizados**
