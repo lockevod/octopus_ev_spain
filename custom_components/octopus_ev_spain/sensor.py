@@ -422,14 +422,6 @@ class OctopusCurrentPriceEVSensor(CoordinatorEntity, SensorEntity):
             "manufacturer": "Lockevod",
             "model": "Spain",
         }
-        
-    return {
-        "identifiers": {(DOMAIN, device_id)},
-        "name": device.get("name", "Unknown Device"),
-        "manufacturer": "Lockevod",
-        "model": f"{device.get('__typename', 'Unknown')} ({device.get('provider', 'Unknown')})",
-        "sw_version": device.get("deviceType", "Unknown"),
-    }
 
 
 # NEW SENSORS - Contract and Property Information
