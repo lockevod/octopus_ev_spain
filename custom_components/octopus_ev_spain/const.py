@@ -155,4 +155,4 @@ VALID_TIME_OPTIONS = [
 ]
 
 # Platforms (for future reference)
-PLATFORMS =["sensor", "switch", "number", "select", "button"]
+PLATFORMS =["sensor", "switch", "number", "select"]

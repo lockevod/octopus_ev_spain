@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -112,16 +112,16 @@ async def async_setup_entry(
 
 
 def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str, Any]:
-    """Safely create device info."""
+    """Safely create device info - FIXED."""
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
-            "name": "Dispositivo Desconocido",  # ✅ Consistente con otros archivos
+            "name": "Dispositivo Desconocido",
             "manufacturer": "Lockevod",
             "model": "Desconocido",
         }
         
-    # ✅ AÑADIR: Retorno cuando device SÍ existe
+    # ✅ FIXED: Añadir el retorno cuando device SÍ existe
     return {
         "identifiers": {(DOMAIN, device_id)},
         "name": device.get("name", "Dispositivo Desconocido"),
@@ -1194,6 +1194,8 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         """Initialize the sensor."""
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1202,13 +1204,23 @@ class OctopusChargerPlannedDispatchesSensor(CoordinatorEntity, SensorEntity):
         self._attr_translation_key = "planned_dispatches"  # Use translation key
         self._attr_icon = "mdi:calendar-clock"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        """Get device data from coordinator."""
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
         try:
-            for devices in self.coordinator.data.get("devices", {}).values():
-                for device in devices:
-                    if device.get("id") == self._device_id:
-                        return device
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+            for device in devices:
+                if device.get("id") == self._device_id:
+                    return device
         except (KeyError, TypeError, AttributeError):
             pass
         return None
@@ -1349,6 +1361,8 @@ class OctopusChargerNextSessionStartSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1357,11 +1371,25 @@ class OctopusChargerNextSessionStartSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:play-circle"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     @property
@@ -1408,6 +1436,8 @@ class OctopusChargerNextSessionEndSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1416,11 +1446,25 @@ class OctopusChargerNextSessionEndSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:stop-circle"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     @property
@@ -1458,6 +1502,8 @@ class OctopusChargerTotalHoursTodaySensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1468,11 +1514,25 @@ class OctopusChargerTotalHoursTodaySensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_icon = "mdi:clock-time-eight"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     @property
@@ -1564,6 +1624,8 @@ class OctopusChargerLastSessionDateSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1572,11 +1634,25 @@ class OctopusChargerLastSessionDateSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.TIMESTAMP
         self._attr_icon = "mdi:calendar-clock"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
@@ -1641,6 +1717,8 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1651,11 +1729,25 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
         self._attr_state_class = SensorStateClass.TOTAL
         self._attr_icon = "mdi:lightning-bolt"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
@@ -1696,6 +1788,8 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1705,11 +1799,25 @@ class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.DURATION
         self._attr_icon = "mdi:timer"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
@@ -1757,6 +1865,8 @@ class OctopusChargerLastSessionCostSensor(CoordinatorEntity, SensorEntity):
     def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, device_id: str) -> None:
         super().__init__(coordinator)
         self._device_id = device_id
+        # ✅ FIXED: Añadir búsqueda de account_number
+        self._account_number = self._find_account_for_device(device_id)
         
         device = self._get_device_data()
         device_name = device.get("name", "Charger") if device else "Charger"
@@ -1766,11 +1876,25 @@ class OctopusChargerLastSessionCostSensor(CoordinatorEntity, SensorEntity):
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_icon = "mdi:currency-eur"
 
+    def _find_account_for_device(self, device_id: str) -> str | None:
+        """Find which account this device belongs to."""
+        for account_number, devices in self.coordinator.data.get("devices", {}).items():
+            for device in devices:
+                if device.get("id") == device_id:
+                    return account_number
+        return None
+
     def _get_device_data(self) -> dict[str, Any] | None:
-        for devices in self.coordinator.data.get("devices", {}).values():
+        """Get device data from coordinator - FIXED."""
+        if not self._account_number:
+            return None
+        try:
+            devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
             for device in devices:
                 if device.get("id") == self._device_id:
                     return device
+        except (KeyError, TypeError, AttributeError):
+            pass
         return None
 
     def _get_last_session(self) -> dict[str, Any] | None:
