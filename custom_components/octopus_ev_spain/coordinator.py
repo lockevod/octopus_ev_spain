@@ -54,6 +54,8 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                 "account_properties": {},  # NEW: For contract and address data
                 "property_meters": {},     # NEW: For CUPS data
                 "electricity_agreements": {},  # NEW: For contract details
+                "agreement_prices": {},    # NEW: For tariff prices
+                "hourly_prices": {},       # NEW: For hourly pricing
                 "devices": {},
                 "planned_dispatches": {},
                 "charge_history": {},
@@ -100,18 +102,60 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                                         agreement_data = await self.api.get_electricity_agreement(meter_id)
                                         data["electricity_agreements"][account_number] = agreement_data
                                         _LOGGER.debug("Got electricity agreement for meter %s", meter_id)
+                                        
+                                        # NEW: Get agreement prices if we have active agreement
+                                        active_agreement = agreement_data.get("activeAgreement")
+                                        if active_agreement:
+                                            agreement_id = active_agreement.get("id")
+                                            if agreement_id:
+                                                try:
+                                                    prices_data = await self.api.get_agreement_prices(agreement_id)
+                                                    data["agreement_prices"][account_number] = prices_data
+                                                    _LOGGER.debug("Got agreement prices for %s", agreement_id)
+                                                    
+                                                    # Generate hourly prices from tariff structure
+                                                    try:
+                                                        data["hourly_prices"][account_number] = self._generate_hourly_prices_from_tariff(prices_data)
+                                                        _LOGGER.debug("Generated hourly prices from tariff for agreement %s", agreement_id)
+                                                    except Exception as err:
+                                                        _LOGGER.warning("Failed to generate hourly prices: %s", err)
+                                                        data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
+                                                        
+                                                except Exception as err:
+                                                    _LOGGER.warning("Failed to get agreement prices: %s", err)
+                                                    data["agreement_prices"][account_number] = {}
+                                                    data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
+                                        else:
+                                            data["agreement_prices"][account_number] = {}
+                                            data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
+                                        
                                     except Exception as err:
                                         _LOGGER.warning("Failed to get electricity agreement for meter %s: %s", meter_id, err)
                                         data["electricity_agreements"][account_number] = {}
+                                        data["agreement_prices"][account_number] = {}
+                                        data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
+                                else:
+                                    data["electricity_agreements"][account_number] = {}
+                                    data["agreement_prices"][account_number] = {}
+                                    data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
                             except Exception as err:
                                 _LOGGER.warning("Failed to get meters for property %s: %s", property_id, err)
                                 data["property_meters"][account_number] = {}
                                 data["electricity_agreements"][account_number] = {}
+                                data["agreement_prices"][account_number] = {}
+                                data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
+                        else:
+                            data["property_meters"][account_number] = {}
+                            data["electricity_agreements"][account_number] = {}
+                            data["agreement_prices"][account_number] = {}
+                            data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
                     except Exception as err:
                         _LOGGER.warning("Failed to get properties for account %s: %s", account_number, err)
                         data["account_properties"][account_number] = {}
                         data["property_meters"][account_number] = {}
                         data["electricity_agreements"][account_number] = {}
+                        data["agreement_prices"][account_number] = {}
+                        data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
                     
                     # Get devices with states
                     devices = await self.api.get_devices_with_states(account_number)
@@ -175,6 +219,8 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                     data["account_properties"][account_number] = {}
                     data["property_meters"][account_number] = {}
                     data["electricity_agreements"][account_number] = {}
+                    data["agreement_prices"][account_number] = {}
+                    data["hourly_prices"][account_number] = {"today": [], "tomorrow": []}
 
             _LOGGER.info("Data update completed for %d accounts", len(self.accounts))
             return data
@@ -339,3 +385,84 @@ class OctopusSpainDataUpdateCoordinator(DataUpdateCoordinator):
                     "end": None,
                 }
             }
+
+    def _generate_hourly_prices_from_tariff(self, prices_data: dict) -> dict:
+        """Generate hourly pricing data from Spanish tariff structure."""
+        import pytz
+        
+        if not prices_data or not prices_data.get("product", {}).get("prices"):
+            return {"today": [], "tomorrow": []}
+        
+        prices = prices_data["product"]["prices"]
+        variable_terms = prices.get("variableTerm", [])
+        
+        if len(variable_terms) < 3:
+            # Not a time-of-use tariff, return empty
+            return {"today": [], "tomorrow": []}
+        
+        # Spanish tariff rates (from your specification)
+        price_peak = float(variable_terms[0])      # PUNTA: 0.197
+        price_standard = float(variable_terms[1])  # LLANO: 0.122  
+        price_valley = float(variable_terms[2])    # VALLE: 0.084
+        
+        # Get timezone
+        tz = pytz.timezone('Europe/Madrid')
+        today = datetime.now(tz).date()
+        tomorrow = today + timedelta(days=1)
+        
+        today_prices = []
+        tomorrow_prices = []
+        
+        # Generate prices for today and tomorrow
+        for target_date in [today, tomorrow]:
+            prices_for_day = []
+            
+            # Generate 30-minute intervals for the full day
+            current_dt = datetime.combine(target_date, datetime.min.time()).replace(tzinfo=tz)
+            end_of_day = current_dt + timedelta(days=1)
+            
+            while current_dt < end_of_day:
+                interval_end = current_dt + timedelta(minutes=30)
+                
+                # Determine price based on Spanish tariff rules
+                price = self._get_spanish_tariff_price(current_dt, price_peak, price_standard, price_valley)
+                
+                price_entry = {
+                    "start": current_dt.isoformat(),
+                    "end": interval_end.isoformat(), 
+                    "value": price
+                }
+                
+                prices_for_day.append(price_entry)
+                current_dt = interval_end
+            
+            # Add to appropriate day
+            if target_date == today:
+                today_prices = prices_for_day
+            else:
+                tomorrow_prices = prices_for_day
+        
+        return {
+            "today": today_prices,
+            "tomorrow": tomorrow_prices
+        }
+    
+    def _get_spanish_tariff_price(self, dt: datetime, price_peak: float, price_standard: float, price_valley: float) -> float:
+        """Get price for specific datetime based on Spanish tariff rules."""
+        weekday = dt.weekday()  # 0=Monday, 6=Sunday
+        hour = dt.hour
+        
+        # Weekend (Saturday=5, Sunday=6): Always VALLE
+        if weekday >= 5:
+            return price_valley
+            
+        # Weekdays: Apply time-based pricing
+        # PUNTA: 10:00-14:00 and 18:00-22:00
+        if (10 <= hour < 14) or (18 <= hour < 22):
+            return price_peak
+        # LLANO: 8:00-10:00, 14:00-18:00, 22:00-24:00  
+        elif (8 <= hour < 10) or (14 <= hour < 18) or (22 <= hour < 24):
+            return price_standard
+        # VALLE: 0:00-8:00
+        else:
+            return price_valley

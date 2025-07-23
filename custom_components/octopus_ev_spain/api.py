@@ -437,3 +437,29 @@ class OctopusSpainAPI:
             }
         })
         return response["data"]["setDevicePreferences"]
+
+    async def get_agreement_prices(self, agreement_id: str) -> dict[str, Any]:
+        """Get tariff prices for an agreement - EXACT query from your files."""
+        query = """
+            query GetRateStructureForProductAgreement($agreementId: ID!) { 
+                agreement(id: $agreementId) { 
+                    product { 
+                        prices { 
+                            fixedTerm 
+                            fixedTermUnits 
+                            variableTerm 
+                            variableTermUnits 
+                            adjustmentMechanism { 
+                                average 
+                                units 
+                            } 
+                        } 
+                    } 
+                } 
+            }
+        """
+        
+        response = await self._execute_query(query, {"agreementId": agreement_id})
+        return response["data"]["agreement"]
+
+ 

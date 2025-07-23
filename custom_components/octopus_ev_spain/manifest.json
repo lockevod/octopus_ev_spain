@@ -2,15 +2,16 @@
   "domain": "octopus_ev_spain",
   "name": "Octopus Energy EV Spain",
   "codeowners": ["@lockevod"],
-  "dependencies": [],
   "config_flow": true,
-  "documentation": "https://github.com/lockevod//ha-octopus-ev-spain",
-  "integration_type": "hub",
+  "dependencies": [],
+  "documentation": "https://github.com/lockevod/ha-octopus-ev-spain",
+  "homeassistant": "2024.1.0",
   "iot_class": "cloud_polling",
-  "issue_tracker": "https://github.com/lockevod//ha-octopus-ev-spain/issues",
-  "requirements": ["python-graphql-client==0.4.3"],
-  "version": "1.0.0",
-  "loggers": [
-    "custom_components.octopus_ev_spain"
-  ]
+  "issue_tracker": "https://github.com/lockevod/ha-octopus-ev-spain/issues",
+  "requirements": [
+    "python-graphql-client>=0.4.3",
+    "pytz>=2023.3"
+  ],
+  "version": "2.1.0",
+  "integration_type": "hub"
 }

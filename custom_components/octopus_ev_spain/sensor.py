@@ -73,6 +73,15 @@ async def async_setup_entry(
         if billing_data.get("last_invoice") is not None:
             entities.append(OctopusInvoiceSensor(coordinator, account_number))
 
+        # Add NEW pricing sensors if available
+        agreement_prices = coordinator.data.get("agreement_prices", {}).get(account_number, {})
+        hourly_prices = coordinator.data.get("hourly_prices", {}).get(account_number, {})
+        if agreement_prices.get("product", {}).get("prices"):
+            entities.append(OctopusTariffPricesSensor(coordinator, account_number))
+        if hourly_prices.get("today") or hourly_prices.get("tomorrow"):
+            entities.append(OctopusCurrentPriceSensor(coordinator, account_number))
+            entities.append(OctopusCurrentPriceEVSensor(coordinator, account_number))
+
     # Device sensors
     for account_number, devices in coordinator.data.get("devices", {}).items():
         for device in devices:
@@ -111,6 +120,308 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
             "manufacturer": "Lockevod",
             "model": "Unknown",
         }
+
+
+class OctopusCurrentPriceEVSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for current electricity price with EV charging discount."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Precio Actual EV" if is_single_account else f"Octopus Precio Actual EV ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_12_current_price_ev"  # Added 12_ prefix
+        self._attr_native_unit_of_measurement = "€/kWh"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_icon = "mdi:car-electric"
+
+    def _get_charger_device_id(self) -> str | None:
+        """Find the first charger device for this account."""
+        devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+        for device in devices:
+            if device.get("__typename") == "SmartFlexChargePoint":
+                return device.get("id")
+        return None
+
+    def _is_charger_connected(self, device_id: str) -> bool:
+        """Check if charger is connected."""
+        devices = self.coordinator.data.get("devices", {}).get(self._account_number, [])
+        for device in devices:
+            if device.get("id") == device_id:
+                current_state = device.get("status", {}).get("currentState")
+                connected_states = ["SMART_CONTROL_CAPABLE", "BOOSTING", "SMART_CONTROL_IN_PROGRESS"]
+                return current_state in connected_states
+        return False
+
+    def _get_current_price_with_ev_discount(self) -> float | None:
+        """Get current price with EV discount applied if charging is scheduled."""
+        import pytz
+        
+        # Get charger device
+        device_id = self._get_charger_device_id()
+        if not device_id:
+            # No charger found, return normal price
+            return self._get_normal_current_price()
+        
+        # Check if charger is connected
+        if not self._is_charger_connected(device_id):
+            # Not connected, return normal price
+            return self._get_normal_current_price()
+        
+        # Get current time
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz)
+        
+        # Check if we're currently in a scheduled charging period
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(device_id, [])
+        for dispatch in dispatches:
+            start_time = dispatch.get("start")
+            end_time = dispatch.get("end")
+            
+            if start_time and end_time:
+                try:
+                    start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+                    end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+                    
+                    if start_dt <= now < end_dt:
+                        # We're in a charging period, return EV price
+                        return 0.068
+                except (ValueError, TypeError):
+                    continue
+        
+        # Not in charging period, return normal price
+        return self._get_normal_current_price()
+
+    def _get_normal_current_price(self) -> float | None:
+        """Get normal current price (same logic as OctopusCurrentPriceSensor)."""
+        import pytz
+        
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        if not hourly_data:
+            return None
+        
+        # Get current time in Spanish timezone
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz)
+        
+        # Check today's prices first
+        today_prices = hourly_data.get("today", [])
+        for price_entry in today_prices:
+            try:
+                start_dt = datetime.fromisoformat(price_entry["start"])
+                end_dt = datetime.fromisoformat(price_entry["end"])
+                
+                if start_dt <= now < end_dt:
+                    return float(price_entry["value"])
+            except (ValueError, TypeError, KeyError):
+                continue
+        
+        # Fallback: calculate directly from tariff
+        tariff_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        prices = tariff_data.get("product", {}).get("prices", {})
+        variable_terms = prices.get("variableTerm", [])
+        
+        if len(variable_terms) >= 3:
+            price_peak = float(variable_terms[0])
+            price_standard = float(variable_terms[1]) 
+            price_valley = float(variable_terms[2])
+            
+            return self._calculate_spanish_price(now, price_peak, price_standard, price_valley)
+        
+        return None
+
+    def _calculate_spanish_price(self, dt: datetime, price_peak: float, price_standard: float, price_valley: float) -> float:
+        """Calculate price using Spanish tariff rules."""
+        weekday = dt.weekday()  # 0=Monday, 6=Sunday
+        hour = dt.hour
+        
+        # Weekend: Always VALLE
+        if weekday >= 5:
+            return price_valley
+            
+        # Weekdays: Time-based pricing
+        if (10 <= hour < 14) or (18 <= hour < 22):  # PUNTA
+            return price_peak
+        elif (8 <= hour < 10) or (14 <= hour < 18) or (22 <= hour < 24):  # LLANO
+            return price_standard
+        else:  # VALLE: 0:00-8:00
+            return price_valley
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current electricity price with EV discount."""
+        return self._get_current_price_with_ev_discount()
+
+    @property
+    def available(self) -> bool:
+        """Return if sensor is available."""
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        tariff_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        
+        # Available if we have either hourly data or tariff data
+        has_hourly = bool(hourly_data.get("today") or hourly_data.get("tomorrow"))
+        has_tariff = bool(tariff_data.get("product", {}).get("prices"))
+        
+        return has_hourly or has_tariff
+
+    def _generate_ev_prices_for_day(self, target_date, base_prices: list) -> list:
+        """Generate EV prices for a specific day applying EV discount to charging periods."""
+        device_id = self._get_charger_device_id()
+        if not device_id or not self._is_charger_connected(device_id):
+            # No charger or not connected, return base prices
+            return base_prices
+        
+        # Get planned dispatches
+        dispatches = self.coordinator.data.get("planned_dispatches", {}).get(device_id, [])
+        if not dispatches:
+            return base_prices
+        
+        # Create modified prices list
+        ev_prices = []
+        for price_entry in base_prices:
+            try:
+                start_dt = datetime.fromisoformat(price_entry["start"])
+                end_dt = datetime.fromisoformat(price_entry["end"])
+                
+                # Check if this interval overlaps with any charging dispatch
+                is_charging_period = False
+                for dispatch in dispatches:
+                    dispatch_start = dispatch.get("start")
+                    dispatch_end = dispatch.get("end")
+                    
+                    if dispatch_start and dispatch_end:
+                        try:
+                            dispatch_start_dt = datetime.fromisoformat(dispatch_start.replace('Z', '+00:00'))
+                            dispatch_end_dt = datetime.fromisoformat(dispatch_end.replace('Z', '+00:00'))
+                            
+                            # Check if intervals overlap
+                            if (start_dt < dispatch_end_dt and end_dt > dispatch_start_dt):
+                                is_charging_period = True
+                                break
+                        except (ValueError, TypeError):
+                            continue
+                
+                # Use EV price if in charging period, otherwise use normal price
+                price_value = 0.068 if is_charging_period else price_entry["value"]
+                
+                ev_price_entry = {
+                    "start": price_entry["start"],
+                    "end": price_entry["end"],
+                    "value": price_value
+                }
+                ev_prices.append(ev_price_entry)
+                
+            except (ValueError, TypeError, KeyError):
+                # If parsing fails, use original entry
+                ev_prices.append(price_entry)
+        
+        return ev_prices
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return hourly prices for today and tomorrow with EV discount applied."""
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        
+        # Get base prices
+        base_today = hourly_data.get("today", [])
+        base_tomorrow = hourly_data.get("tomorrow", [])
+        
+        # Apply EV discount
+        import pytz
+        tz = pytz.timezone('Europe/Madrid')
+        today = datetime.now(tz).date()
+        tomorrow = today + timedelta(days=1)
+        
+        ev_today = self._generate_ev_prices_for_day(today, base_today)
+        ev_tomorrow = self._generate_ev_prices_for_day(tomorrow, base_tomorrow)
+        
+        attrs = {
+            "account_number": self._account_number,
+            "today": ev_today,
+            "tomorrow": ev_tomorrow,
+        }
+        
+        # Add charger info
+        device_id = self._get_charger_device_id()
+        if device_id:
+            attrs["charger_device_id"] = device_id
+            attrs["charger_connected"] = self._is_charger_connected(device_id)
+            
+            # Add dispatch info
+            dispatches = self.coordinator.data.get("planned_dispatches", {}).get(device_id, [])
+            attrs["charging_sessions_count"] = len(dispatches)
+            
+            if dispatches:
+                charging_periods = []
+                for dispatch in dispatches:
+                    start_time = dispatch.get("start")
+                    end_time = dispatch.get("end")
+                    if start_time and end_time:
+                        charging_periods.append({
+                            "start": start_time,
+                            "end": end_time
+                        })
+                attrs["charging_periods"] = charging_periods
+        else:
+            attrs["charger_device_id"] = None
+            attrs["charger_connected"] = False
+            attrs["charging_sessions_count"] = 0
+        
+        # Add convenience attributes
+        if ev_today:
+            prices_values = [float(p["value"]) for p in ev_today if "value" in p]
+            if prices_values:
+                attrs["today_min_price"] = min(prices_values)
+                attrs["today_max_price"] = max(prices_values)
+                attrs["today_avg_price"] = sum(prices_values) / len(prices_values)
+                attrs["today_prices_count"] = len(prices_values)
+                
+                # Count EV discounted periods
+                ev_periods = [p for p in ev_today if p.get("value") == 0.068]
+                attrs["today_ev_discount_periods"] = len(ev_periods)
+        
+        if ev_tomorrow:
+            prices_values = [float(p["value"]) for p in ev_tomorrow if "value" in p]
+            if prices_values:
+                attrs["tomorrow_min_price"] = min(prices_values)
+                attrs["tomorrow_max_price"] = max(prices_values)
+                attrs["tomorrow_avg_price"] = sum(prices_values) / len(prices_values)
+                attrs["tomorrow_prices_count"] = len(prices_values)
+                
+                # Count EV discounted periods  
+                ev_periods = [p for p in ev_tomorrow if p.get("value") == 0.068]
+                attrs["tomorrow_ev_discount_periods"] = len(ev_periods)
+        
+        # Add current period info
+        import pytz
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz)
+        
+        for price_entry in ev_today:
+            try:
+                start_dt = datetime.fromisoformat(price_entry["start"])
+                end_dt = datetime.fromisoformat(price_entry["end"])
+                
+                if start_dt <= now < end_dt:
+                    attrs["current_period_start"] = price_entry["start"]
+                    attrs["current_period_end"] = price_entry["end"]
+                    attrs["current_period_value"] = price_entry["value"]
+                    attrs["current_period_is_ev_discount"] = (price_entry["value"] == 0.068)
+                    break
+            except (ValueError, TypeError, KeyError):
+                continue
+        
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
         
     return {
         "identifiers": {(DOMAIN, device_id)},
@@ -132,7 +443,7 @@ class OctopusContractNumberSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus Número de Contrato" if is_single_account else f"Octopus Número de Contrato ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_contract_number"
+        self._attr_unique_id = f"octopus_{account_number}_01_contract_number"  # FIXED: Added 01_ prefix
         self._attr_icon = "mdi:file-document-outline"
 
     @property
@@ -159,7 +470,7 @@ class OctopusAddressSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus Dirección" if is_single_account else f"Octopus Dirección ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_address"
+        self._attr_unique_id = f"octopus_{account_number}_02_address"  # FIXED: Added 02_ prefix
         self._attr_icon = "mdi:home"
 
     @property
@@ -188,7 +499,7 @@ class OctopusCupsSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus CUPS Electricidad" if is_single_account else f"Octopus CUPS Electricidad ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_electricity_cups"
+        self._attr_unique_id = f"octopus_{account_number}_03_electricity_cups"  # FIXED: Added 03_ prefix
         self._attr_icon = "mdi:electric-switch"
 
     @property
@@ -218,7 +529,7 @@ class OctopusContractTypeSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus Tipo de Contrato" if is_single_account else f"Octopus Tipo de Contrato ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_contract_type"
+        self._attr_unique_id = f"octopus_{account_number}_04_contract_type"  # FIXED: Added 04_ prefix
         self._attr_icon = "mdi:file-contract"
 
     @property
@@ -248,7 +559,7 @@ class OctopusContractValidFromSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus Contrato Válido Desde" if is_single_account else f"Octopus Contrato Válido Desde ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_contract_valid_from"
+        self._attr_unique_id = f"octopus_{account_number}_05_contract_valid_from"  # FIXED: Added 05_ prefix
         self._attr_device_class = SensorDeviceClass.DATE
         self._attr_icon = "mdi:calendar-start"
 
@@ -284,7 +595,7 @@ class OctopusContractValidToSensor(CoordinatorEntity, SensorEntity):
         
         is_single_account = len(coordinator.accounts) == 1
         self._attr_name = "Octopus Contrato Válido Hasta" if is_single_account else f"Octopus Contrato Válido Hasta ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_contract_valid_to"
+        self._attr_unique_id = f"octopus_{account_number}_06_contract_valid_to"  # FIXED: Added 06_ prefix
         self._attr_device_class = SensorDeviceClass.DATE
         self._attr_icon = "mdi:calendar-end"
 
@@ -411,7 +722,16 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
         # Use friendly names from constants
         ledger_name = LEDGER_NAMES.get(self._ledger_type, self._ledger_type.replace("_", " ").title())
         self._attr_name = f"Octopus {ledger_name} Saldo"
-        self._attr_unique_id = f"octopus_{account_number}_{self._ledger_type.lower()}_balance"
+        
+        # FIXED: Added numeric prefixes for proper ordering
+        if self._ledger_type == ELECTRICITY_LEDGER:
+            self._attr_unique_id = f"octopus_{account_number}_07_electricity_balance"
+        elif self._ledger_type == SOLAR_WALLET_LEDGER:
+            self._attr_unique_id = f"octopus_{account_number}_08_solar_wallet_balance"
+        else:
+            # Fallback for any other ledger types
+            self._attr_unique_id = f"octopus_{account_number}_99_{self._ledger_type.lower()}_balance"
+            
         self._attr_native_unit_of_measurement = CURRENCY_EURO
         self._attr_device_class = SensorDeviceClass.MONETARY
         self._attr_state_class = SensorStateClass.TOTAL
@@ -440,6 +760,324 @@ class OctopusLedgerSensor(CoordinatorEntity, SensorEntity):
                     "ledger_type": self._ledger_type,
                 }
         return {}
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusInvoiceSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for last invoice - FROM ORIGINAL REPO."""
+
+    def __init__(
+        self,
+        coordinator: OctopusSpainDataUpdateCoordinator,
+        account_number: str,
+    ) -> None:
+        """Initialize the sensor."""
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        # Handle single vs multiple accounts naming
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Última Factura Octopus" if is_single_account else f"Última Factura Octopus ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_09_last_invoice"  # FIXED: Added 09_ prefix
+        self._attr_native_unit_of_measurement = CURRENCY_EURO
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_state_class = SensorStateClass.TOTAL
+        self._attr_icon = "mdi:currency-eur"
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the invoice amount."""
+        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
+        last_invoice = billing_data.get("last_invoice")
+        
+        if last_invoice and last_invoice.get("amount") is not None:
+            return float(last_invoice["amount"])
+        return None
+
+    @property
+    def available(self) -> bool:
+        """Return if sensor is available."""
+        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
+        return billing_data.get("last_invoice") is not None
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes."""
+        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
+        last_invoice = billing_data.get("last_invoice")
+        
+        attrs = {
+            "account_number": self._account_number,
+        }
+        
+        if last_invoice:
+            # Following original repo attribute names
+            if last_invoice.get("start"):
+                attrs["Inicio"] = last_invoice["start"]
+            if last_invoice.get("end"):
+                attrs["Fin"] = last_invoice["end"]
+            if last_invoice.get("issued"):
+                attrs["Emitida"] = last_invoice["issued"]
+        
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+# NEW PRICING SENSORS
+
+class OctopusTariffPricesSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for tariff price structure."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Precios Tarifa" if is_single_account else f"Octopus Precios Tarifa ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_10_tariff_prices"  # Added 10_ prefix
+        self._attr_icon = "mdi:currency-eur"
+
+    @property
+    def native_value(self) -> str | None:
+        """Return tariff price summary."""
+        prices_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        prices = prices_data.get("product", {}).get("prices", {})
+        
+        if not prices:
+            return "No disponible"
+        
+        variable_terms = prices.get("variableTerm", [])
+        if variable_terms:
+            # Show the main variable term (usually the first one for standard rate)
+            main_rate = variable_terms[0] if len(variable_terms) > 0 else 0
+            
+            # Check if we have different rates (indicating time-of-use pricing)
+            if len(variable_terms) > 1:
+                min_rate = min(variable_terms)
+                max_rate = max(variable_terms)
+                return f"Variable: {min_rate:.3f} - {max_rate:.3f} €/kWh"
+            else:
+                return f"Variable: {main_rate:.3f} €/kWh"
+        
+        return "Sin datos de precios"
+
+    @property
+    def available(self) -> bool:
+        """Return if sensor is available."""
+        prices_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        return bool(prices_data.get("product", {}).get("prices"))
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return extra attributes with detailed pricing."""
+        prices_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        prices = prices_data.get("product", {}).get("prices", {})
+        
+        attrs = {
+            "account_number": self._account_number,
+        }
+        
+        if prices:
+            # Fixed terms
+            fixed_terms = prices.get("fixedTerm", [])
+            fixed_units = prices.get("fixedTermUnits", "")
+            if fixed_terms:
+                attrs["fixed_term_power"] = f"{fixed_terms[0]} {fixed_units}" if len(fixed_terms) > 0 else None
+                attrs["fixed_term_energy"] = f"{fixed_terms[1]} {fixed_units}" if len(fixed_terms) > 1 else None
+            
+            # Variable terms
+            variable_terms = prices.get("variableTerm", [])
+            variable_units = prices.get("variableTermUnits", "")
+            if variable_terms:
+                attrs["variable_term_units"] = variable_units
+                attrs["variable_terms_count"] = len(variable_terms)
+                
+                # Intelligent GO typically has 3 rates: Peak, Standard, Off-peak
+                if len(variable_terms) >= 3:
+                    attrs["rate_peak"] = f"{variable_terms[0]} {variable_units}"      # Peak (most expensive)
+                    attrs["rate_standard"] = f"{variable_terms[1]} {variable_units}"  # Standard
+                    attrs["rate_offpeak"] = f"{variable_terms[2]} {variable_units}"   # Off-peak (cheapest)
+                elif len(variable_terms) == 2:
+                    attrs["rate_peak"] = f"{variable_terms[0]} {variable_units}"
+                    attrs["rate_offpeak"] = f"{variable_terms[1]} {variable_units}"
+                elif len(variable_terms) == 1:
+                    attrs["rate_standard"] = f"{variable_terms[0]} {variable_units}"
+                
+                # Add all rates as list for automations
+                attrs["all_variable_rates"] = [float(rate) for rate in variable_terms]
+            
+            # Adjustment mechanism
+            adjustment = prices.get("adjustmentMechanism")
+            if adjustment:
+                attrs["adjustment_average"] = adjustment.get("average")
+                attrs["adjustment_units"] = adjustment.get("units")
+        
+        return attrs
+
+    @property
+    def device_info(self) -> dict[str, Any]:
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
+            "name": "Octopus Energy EV España",
+            "manufacturer": "Lockevod",
+            "model": "Spain",
+        }
+
+
+class OctopusCurrentPriceSensor(CoordinatorEntity, SensorEntity):
+    """Sensor for current electricity price."""
+
+    def __init__(self, coordinator: OctopusSpainDataUpdateCoordinator, account_number: str) -> None:
+        super().__init__(coordinator)
+        self._account_number = account_number
+        
+        is_single_account = len(coordinator.accounts) == 1
+        self._attr_name = "Octopus Precio Actual" if is_single_account else f"Octopus Precio Actual ({account_number})"
+        self._attr_unique_id = f"octopus_{account_number}_11_current_price"  # Added 11_ prefix
+        self._attr_native_unit_of_measurement = "€/kWh"
+        self._attr_device_class = SensorDeviceClass.MONETARY
+        self._attr_icon = "mdi:cash"
+
+    def _get_current_price(self) -> float | None:
+        """Get current price based on time from generated hourly data."""
+        import pytz
+        
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        if not hourly_data:
+            return None
+        
+        # Get current time in Spanish timezone
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz)
+        
+        # Check today's prices first
+        today_prices = hourly_data.get("today", [])
+        for price_entry in today_prices:
+            try:
+                start_dt = datetime.fromisoformat(price_entry["start"])
+                end_dt = datetime.fromisoformat(price_entry["end"])
+                
+                if start_dt <= now < end_dt:
+                    return float(price_entry["value"])
+            except (ValueError, TypeError, KeyError):
+                continue
+        
+        # Fallback: calculate directly from tariff if no match found
+        tariff_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        prices = tariff_data.get("product", {}).get("prices", {})
+        variable_terms = prices.get("variableTerm", [])
+        
+        if len(variable_terms) >= 3:
+            # Use Spanish tariff logic
+            price_peak = float(variable_terms[0])
+            price_standard = float(variable_terms[1]) 
+            price_valley = float(variable_terms[2])
+            
+            return self._calculate_spanish_price(now, price_peak, price_standard, price_valley)
+        
+        return None
+    
+    def _calculate_spanish_price(self, dt: datetime, price_peak: float, price_standard: float, price_valley: float) -> float:
+        """Calculate price using Spanish tariff rules."""
+        weekday = dt.weekday()  # 0=Monday, 6=Sunday
+        hour = dt.hour
+        
+        # Weekend: Always VALLE
+        if weekday >= 5:
+            return price_valley
+            
+        # Weekdays: Time-based pricing
+        if (10 <= hour < 14) or (18 <= hour < 22):  # PUNTA
+            return price_peak
+        elif (8 <= hour < 10) or (14 <= hour < 18) or (22 <= hour < 24):  # LLANO
+            return price_standard
+        else:  # VALLE: 0:00-8:00
+            return price_valley
+
+    @property
+    def native_value(self) -> float | None:
+        """Return current electricity price."""
+        return self._get_current_price()
+
+    @property
+    def available(self) -> bool:
+        """Return if sensor is available."""
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        tariff_data = self.coordinator.data.get("agreement_prices", {}).get(self._account_number, {})
+        
+        # Available if we have either hourly data or tariff data
+        has_hourly = bool(hourly_data.get("today") or hourly_data.get("tomorrow"))
+        has_tariff = bool(tariff_data.get("product", {}).get("prices"))
+        
+        return has_hourly or has_tariff
+
+    @property
+    def extra_state_attributes(self) -> dict[str, Any]:
+        """Return hourly prices for today and tomorrow."""
+        hourly_data = self.coordinator.data.get("hourly_prices", {}).get(self._account_number, {})
+        
+        attrs = {
+            "account_number": self._account_number,
+            "today": hourly_data.get("today", []),
+            "tomorrow": hourly_data.get("tomorrow", []),
+        }
+        
+        # Add some convenience attributes
+        today_prices = hourly_data.get("today", [])
+        tomorrow_prices = hourly_data.get("tomorrow", [])
+        
+        if today_prices:
+            prices_values = [float(p["value"]) for p in today_prices if "value" in p]
+            if prices_values:
+                attrs["today_min_price"] = min(prices_values)
+                attrs["today_max_price"] = max(prices_values)
+                attrs["today_avg_price"] = sum(prices_values) / len(prices_values)
+                attrs["today_prices_count"] = len(prices_values)
+        
+        if tomorrow_prices:
+            prices_values = [float(p["value"]) for p in tomorrow_prices if "value" in p]
+            if prices_values:
+                attrs["tomorrow_min_price"] = min(prices_values)
+                attrs["tomorrow_max_price"] = max(prices_values)
+                attrs["tomorrow_avg_price"] = sum(prices_values) / len(prices_values)
+                attrs["tomorrow_prices_count"] = len(prices_values)
+        
+        # Add current period info
+        import pytz
+        
+        tz = pytz.timezone('Europe/Madrid')
+        now = datetime.now(tz)
+        
+        for price_entry in today_prices:
+            try:
+                start_dt = datetime.fromisoformat(price_entry["start"])
+                end_dt = datetime.fromisoformat(price_entry["end"])
+                
+                if start_dt <= now < end_dt:
+                    attrs["current_period_start"] = price_entry["start"]
+                    attrs["current_period_end"] = price_entry["end"]
+                    attrs["current_period_value"] = price_entry["value"]
+                    break
+            except (ValueError, TypeError, KeyError):
+                continue
+        
+        return attrs
 
     @property
     def device_info(self) -> dict[str, Any]:
@@ -1049,74 +1687,6 @@ class OctopusChargerLastEnergyAddedSensor(CoordinatorEntity, SensorEntity):
     def device_info(self) -> dict[str, Any]:
         device = self._get_device_data()
         return _safe_device_info(self._device_id, device)
-
-
-class OctopusInvoiceSensor(CoordinatorEntity, SensorEntity):
-    """Sensor for last invoice - FROM ORIGINAL REPO."""
-
-    def __init__(
-        self,
-        coordinator: OctopusSpainDataUpdateCoordinator,
-        account_number: str,
-    ) -> None:
-        """Initialize the sensor."""
-        super().__init__(coordinator)
-        self._account_number = account_number
-        
-        # Handle single vs multiple accounts naming
-        is_single_account = len(coordinator.accounts) == 1
-        self._attr_name = "Última Factura Octopus" if is_single_account else f"Última Factura Octopus ({account_number})"
-        self._attr_unique_id = f"octopus_{account_number}_last_invoice"
-        self._attr_native_unit_of_measurement = CURRENCY_EURO
-        self._attr_device_class = SensorDeviceClass.MONETARY
-        self._attr_state_class = SensorStateClass.TOTAL
-        self._attr_icon = "mdi:currency-eur"
-
-    @property
-    def native_value(self) -> float | None:
-        """Return the invoice amount."""
-        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
-        last_invoice = billing_data.get("last_invoice")
-        
-        if last_invoice and last_invoice.get("amount") is not None:
-            return float(last_invoice["amount"])
-        return None
-
-    @property
-    def available(self) -> bool:
-        """Return if sensor is available."""
-        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
-        return billing_data.get("last_invoice") is not None
-
-    @property
-    def extra_state_attributes(self) -> dict[str, Any]:
-        """Return extra attributes."""
-        billing_data = self.coordinator.data.get("billing_info", {}).get(self._account_number, {})
-        last_invoice = billing_data.get("last_invoice")
-        
-        attrs = {
-            "account_number": self._account_number,
-        }
-        
-        if last_invoice:
-            # Following original repo attribute names
-            if last_invoice.get("start"):
-                attrs["Inicio"] = last_invoice["start"]
-            if last_invoice.get("end"):
-                attrs["Fin"] = last_invoice["end"]
-            if last_invoice.get("issued"):
-                attrs["Emitida"] = last_invoice["issued"]
-        
-        return attrs
-
-    @property
-    def device_info(self) -> dict[str, Any]:
-        return {
-            "identifiers": {(DOMAIN, self.coordinator.entry_id)},
-            "name": "Octopus Energy EV España",
-            "manufacturer": "Lockevod",
-            "model": "Spain",
-        }
 
 
 class OctopusChargerLastSessionDurationSensor(CoordinatorEntity, SensorEntity):
