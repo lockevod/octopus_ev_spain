@@ -66,6 +66,15 @@
       "last_invoice": {
         "name": "Last Invoice"
       },
+      "tariff_prices": {
+        "name": "Tariff Prices"
+      },
+      "current_price": {
+        "name": "Current Price"
+      },
+      "current_price_ev": {
+        "name": "Current Price EV"
+      },
       "device_state": {
         "name": "Device State",
         "state": {

@@ -1,13 +1,16 @@
 """Constants for the Octopus Energy Spain integration."""
 from datetime import timedelta
+from typing import Final
 
 # Integration info
-DOMAIN = "octopus_ev_spain"
-MANUFACTURER = "Lockevod"
-MODEL = "Spain"
+DOMAIN: Final = "octopus_ev_spain"
+MANUFACTURER: Final = "Lockevod"
+MODEL: Final = "Spain"
 
 # Config flow
 CONF_ACCOUNT = "account"
+CONF_EMAIL: Final = "email"
+CONF_PASSWORD: Final = "password"
 
 # Default values
 DEFAULT_SCAN_INTERVAL = timedelta(minutes=5)
@@ -19,13 +22,11 @@ GRAPH_QL_ENDPOINT = "https://api.oees-kraken.energy/v1/graphql/"
 # Ledger types from API
 ELECTRICITY_LEDGER = "SPAIN_ELECTRICITY_LEDGER"
 SOLAR_WALLET_LEDGER = "SPAIN_SOLAR_WALLET_LEDGER"
-GAS_LEDGER = "SPAIN_GAS_LEDGER"  # Not used but may appear in API
 
 # Friendly names for ledgers
 LEDGER_NAMES = {
     ELECTRICITY_LEDGER: "Electricidad",
-    SOLAR_WALLET_LEDGER: "Monedero Solar",
-    GAS_LEDGER: "Gas",
+    SOLAR_WALLET_LEDGER: "Monedero Solar"
 }
 
 # Device types
@@ -115,3 +116,43 @@ DEVICE_SENSOR_PREFIX_LAST_SESSION_DATE = "08"
 DEVICE_SENSOR_PREFIX_LAST_SESSION_DURATION = "09"
 DEVICE_SENSOR_PREFIX_LAST_ENERGY_ADDED = "10"
 DEVICE_SENSOR_PREFIX_LAST_SESSION_COST = "11"
+
+# Services
+SERVICE_START_BOOST = "start_boost_charge"
+SERVICE_STOP_BOOST = "stop_boost_charge"
+SERVICE_REFRESH_CHARGER = "refresh_charger"
+SERVICE_CHECK_CHARGER = "check_charger"
+SERVICE_CAR_CONNECTED = "car_connected"
+SERVICE_CAR_DISCONNECTED = "car_disconnected"
+SERVICE_SET_PREFERENCES = "set_preferences"
+
+# Service attributes
+ATTR_DEVICE_ID = "device_id"
+ATTR_NOTIFY = "notify"
+ATTR_MAX_PERCENTAGE = "max_percentage"
+ATTR_TARGET_TIME = "target_time"
+
+# Event names for automations
+EVENT_CHARGER_CHECKED = "octopus_charger_checked"
+EVENT_CHARGER_REFRESHED = "octopus_charger_refreshed"
+EVENT_CAR_CONNECTED = "octopus_car_connected"
+EVENT_CAR_DISCONNECTED = "octopus_car_disconnected"
+EVENT_PREFERENCES_UPDATED = "octopus_preferences_updated"
+
+
+# Default values for charger configuration
+DEFAULT_MAX_PERCENTAGE = 95
+DEFAULT_TARGET_TIME = "10:30"
+
+# Days of the week (for preferences)
+DAYS_OF_WEEK = ["MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY", "SUNDAY"]
+
+# Valid time options for target time (04:00 to 11:00 in 30-minute steps)  
+VALID_TIME_OPTIONS = [
+    "04:00", "04:30", "05:00", "05:30", "06:00", "06:30",
+    "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", 
+    "10:00", "10:30", "11:00"
+]
+
+# Platforms (for future reference)
+PLATFORMS = PLATFORMS = ["sensor", "switch", "number", "select"]

@@ -66,6 +66,15 @@
       "last_invoice": {
         "name": "Última Factura"
       },
+      "tariff_prices": {
+        "name": "Precios Tarifa"
+      },
+      "current_price": {
+        "name": "Precio Actual"
+      },
+      "current_price_ev": {
+        "name": "Precio Actual EV"
+      },
       "device_state": {
         "name": "Estado",
         "state": {

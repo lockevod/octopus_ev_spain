@@ -11,17 +11,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, DEFAULT_MAX_PERCENTAGE, DAYS_OF_WEEK
+from .const import DOMAIN, DEFAULT_MAX_PERCENTAGE, DAYS_OF_WEEK, VALID_TIME_OPTIONS
 from .coordinator import OctopusSpainDataUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
-
-# Valid time options (04:00 to 11:00 in 30-minute steps)
-VALID_TIME_OPTIONS = [
-    "04:00", "04:30", "05:00", "05:30", "06:00", "06:30",
-    "07:00", "07:30", "08:00", "08:30", "09:00", "09:30", 
-    "10:00", "10:30", "11:00"
-]
 
 
 async def async_setup_entry(
