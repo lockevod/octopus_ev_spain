@@ -116,10 +116,19 @@ def _safe_device_info(device_id: str, device: dict[str, Any] | None) -> dict[str
     if not device:
         return {
             "identifiers": {(DOMAIN, device_id)},
-            "name": "Unknown Device",  # This will be translated by HA
+            "name": "Dispositivo Desconocido",  # ✅ Consistente con otros archivos
             "manufacturer": "Lockevod",
-            "model": "Unknown",
+            "model": "Desconocido",
         }
+        
+    # ✅ AÑADIR: Retorno cuando device SÍ existe
+    return {
+        "identifiers": {(DOMAIN, device_id)},
+        "name": device.get("name", "Dispositivo Desconocido"),
+        "manufacturer": "Lockevod",
+        "model": f"{device.get('__typename', 'Desconocido')} ({device.get('provider', 'Desconocido')})",
+        "sw_version": device.get("deviceType", "Desconocido"),
+    }
 
 
 class OctopusCurrentPriceEVSensor(CoordinatorEntity, SensorEntity):
