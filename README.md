@@ -2,7 +2,6 @@
 
 [![hacs_badge](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://github.com/custom-components/hacs)
 [![GitHub release](https://img.shields.io/github/release/lockevod/ha-octopus-ev-spain.svg)](https://github.com/lockevod/ha-octopus-ev-spain/releases)
-[![GitHub](https://img.shields.io/github/license/lockevod/ha-octopus-ev-spain.svg)](LICENSE)
 [![Maintenance](https://img.shields.io/badge/Maintained%3F-yes-green.svg)](https://github.com/lockevod/ha-octopus-ev-spain/graphs/commit-activity)
 
 Integración **no oficial** para conectar tu cuenta de **Octopus Energy España** con Home Assistant. Monitoriza tu consumo, saldos, facturas y controla tu cargador EV inteligente.
