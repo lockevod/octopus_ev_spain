@@ -2,6 +2,5 @@
   "name": "Octopus Energy EV Spain",
   "country": ["ES"],
   "homeassistant": "2025.1.0",
-  "render_readme": true,
-  "iot_class": "cloud_polling"
+  "render_readme": true
 }
